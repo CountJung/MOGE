@@ -5,16 +5,32 @@
 
 <MudPaper Elevation="1" Class="pa-2" Style="height: clamp(320px, 70vh, 720px);">
     <div style="position:relative; width:100%; height:100%;">
-        <canvas @ref="_canvas" style="width:100%; height:100%; touch-action:none; display:block;"
-                @onwheel="OnWheel"
-                @onpointerdown="OnPointerDown"
-                @onpointermove="OnPointerMove"
-                @onpointerup="OnPointerUp"
-                @onpointerleave="OnPointerUp">
+        <canvas @ref="_canvas" draggable="false" style="width:100%; height:100%; touch-action:none; display:block; user-select:none; -webkit-user-select:none; -webkit-user-drag:none;"
+            @onwheel="OnWheel"
+            @onpointerdown="OnPointerDown" @onpointerdown:preventDefault="true"
+            @onpointermove="OnPointerMove" @onpointermove:preventDefault="true"
+            @onpointerup="OnPointerUp" @onpointerup:preventDefault="true"
+            @onpointerleave="OnPointerUp">
         </canvas>
 
         @if (EnableHandles && Handles is { Count: > 0 })
         {
+            @if (HandlesAsRectangle && Handles.Count >= 2)
+            {
+                var minX = Handles.Min(p => p.X);
+                var maxX = Handles.Max(p => p.X);
+                var minY = Handles.Min(p => p.Y);
+                var maxY = Handles.Max(p => p.Y);
+
+                var rectLeft = _offsetX + (minX * _scale);
+                var rectTop = _offsetY + (minY * _scale);
+                var rectWidth = (maxX - minX) * _scale;
+                var rectHeight = (maxY - minY) * _scale;
+
+                // Visual crop rectangle overlay. Uses MudBlazor theme CSS variables (no hard-coded colors).
+                <div style="position:absolute; left:@(rectLeft)px; top:@(rectTop)px; width:@(rectWidth)px; height:@(rectHeight)px; box-sizing:border-box; border:2px solid var(--mud-palette-primary); pointer-events:none;"></div>
+            }
+
             @for (var i = 0; i < Handles.Count; i++)
             {
                 var handleIndex = i;
@@ -22,8 +38,17 @@
                 var screenX = _offsetX + (p.X * _scale);
                 var screenY = _offsetY + (p.Y * _scale);
 
-                <div style="position:absolute; left:@(screenX - 8)px; top:@(screenY - 8)px; width:16px; height:16px; border-radius:50%; background: var(--mud-palette-primary); touch-action:none;"
-                     @onpointerdown="(e) => OnHandlePointerDown(handleIndex, e)">
+                var isRect = HandlesAsRectangle;
+                var size = isRect ? 14 : 16;
+                var half = size / 2.0;
+                var borderRadius = isRect ? "2px" : "50%";
+                var border = isRect ? "2px solid var(--mud-palette-surface)" : "0";
+
+                 <div draggable="false" style="position:absolute; left:@(screenX - half)px; top:@(screenY - half)px; width:@(size)px; height:@(size)px; border-radius:@(borderRadius); background: var(--mud-palette-primary); border:@(border); touch-action:none; user-select:none; -webkit-user-select:none; -webkit-user-drag:none; cursor:move;"
+                     @onpointerdown="(e) => OnHandlePointerDown(handleIndex, e)" @onpointerdown:preventDefault="true" @onpointerdown:stopPropagation="true"
+                     @onpointermove="MoveHandleAsync" @onpointermove:preventDefault="true" @onpointermove:stopPropagation="true"
+                     @onpointerup="OnPointerUp" @onpointerup:preventDefault="true" @onpointerup:stopPropagation="true"
+                     @onpointerleave="OnPointerUp">
                 </div>
             }
         }
@@ -37,7 +62,12 @@
     [Parameter] public byte[]? ImageBytes { get; set; }
     [Parameter] public string? ContentType { get; set; }
 
+    [Parameter] public CanvasInteractionMode InteractionMode { get; set; } = CanvasInteractionMode.PanZoom;
+    [Parameter] public int BrushRadius { get; set; } = 8;
+    [Parameter] public EventCallback<CanvasStroke> StrokeCommitted { get; set; }
+
     [Parameter] public bool EnableHandles { get; set; }
+    [Parameter] public bool HandlesAsRectangle { get; set; }
     [Parameter] public IReadOnlyList<CanvasPoint>? Handles { get; set; }
     [Parameter] public EventCallback<IReadOnlyList<CanvasPoint>> HandlesChanged { get; set; }
 
@@ -52,6 +82,10 @@
     private bool _panning;
     private double _lastClientX;
     private double _lastClientY;
+
+    private bool _drawing;
+    private readonly List<CanvasPoint> _strokePoints = new();
+    private DomRect? _strokeRect;
 
     private int? _dragHandleIndex;
     private DomRect? _cachedRect;
@@ -153,13 +187,24 @@
         await RedrawAsync();
     }
 
-    private void OnPointerDown(PointerEventArgs e)
+    private async Task OnPointerDown(PointerEventArgs e)
     {
         if (ImageBytes is null || ImageBytes.Length == 0)
             return;
 
         if (_dragHandleIndex is not null)
             return;
+
+        if (InteractionMode != CanvasInteractionMode.PanZoom)
+        {
+            _drawing = true;
+            _strokePoints.Clear();
+            _strokeRect = await Js.InvokeAsync<DomRect>("mogeCanvas.getRect", _canvas);
+
+            var p = ClientToImagePoint(e.ClientX, e.ClientY, _strokeRect);
+            _strokePoints.Add(p);
+            return;
+        }
 
         _panning = true;
         _lastClientX = e.ClientX;
@@ -168,6 +213,26 @@
 
     private async Task OnPointerMove(PointerEventArgs e)
     {
+        if (_drawing)
+        {
+            if (_strokeRect is null)
+                _strokeRect = await Js.InvokeAsync<DomRect>("mogeCanvas.getRect", _canvas);
+
+            var p = ClientToImagePoint(e.ClientX, e.ClientY, _strokeRect);
+            if (_strokePoints.Count == 0)
+            {
+                _strokePoints.Add(p);
+                return;
+            }
+
+            var last = _strokePoints[^1];
+            if (Math.Abs(p.X - last.X) < 0.5 && Math.Abs(p.Y - last.Y) < 0.5)
+                return;
+
+            _strokePoints.Add(p);
+            return;
+        }
+
         if (_dragHandleIndex is not null && Handles is { Count: > 0 })
         {
             await MoveHandleAsync(e);
@@ -190,10 +255,42 @@
 
     private async Task OnPointerUp(PointerEventArgs _)
     {
+        if (_drawing)
+        {
+            _drawing = false;
+            _strokeRect = null;
+
+            if (_strokePoints.Count >= 1)
+            {
+                var stroke = new CanvasStroke(InteractionMode, _strokePoints.ToArray());
+                _strokePoints.Clear();
+                await StrokeCommitted.InvokeAsync(stroke);
+            }
+            else
+            {
+                _strokePoints.Clear();
+            }
+
+            _panning = false;
+            _dragHandleIndex = null;
+            _cachedRect = null;
+            return;
+        }
+
         _panning = false;
         _dragHandleIndex = null;
         _cachedRect = null;
         await Task.CompletedTask;
+    }
+
+    private CanvasPoint ClientToImagePoint(double clientX, double clientY, DomRect rect)
+    {
+        var x = clientX - rect.left;
+        var y = clientY - rect.top;
+
+        var imageX = (x - _offsetX) / _scale;
+        var imageY = (y - _offsetY) / _scale;
+        return new CanvasPoint(imageX, imageY);
     }
 
     private async Task OnHandlePointerDown(int index, PointerEventArgs e)
@@ -230,6 +327,57 @@
 
         var updated = Handles.ToArray();
         updated[dragIndex] = new CanvasPoint(imageX, imageY);
+
+        // When handles represent an axis-aligned rectangle (crop), dragging one corner should move the
+        // corresponding edges (so the rectangle can shrink/grow with a single corner drag).
+        if (HandlesAsRectangle && updated.Length == 4)
+        {
+            // Index convention used by Editor crop mode:
+            // 0: TL, 1: TR, 2: BR, 3: BL
+            switch (dragIndex)
+            {
+                case 0: // TL (opposite: BR)
+                {
+                    var right = updated[2].X;
+                    var bottom = updated[2].Y;
+                    var left = updated[0].X;
+                    var top = updated[0].Y;
+                    updated[1] = new CanvasPoint(right, top);
+                    updated[3] = new CanvasPoint(left, bottom);
+                    break;
+                }
+                case 1: // TR (opposite: BL)
+                {
+                    var left = updated[3].X;
+                    var bottom = updated[3].Y;
+                    var right = updated[1].X;
+                    var top = updated[1].Y;
+                    updated[0] = new CanvasPoint(left, top);
+                    updated[2] = new CanvasPoint(right, bottom);
+                    break;
+                }
+                case 2: // BR (opposite: TL)
+                {
+                    var left = updated[0].X;
+                    var top = updated[0].Y;
+                    var right = updated[2].X;
+                    var bottom = updated[2].Y;
+                    updated[1] = new CanvasPoint(right, top);
+                    updated[3] = new CanvasPoint(left, bottom);
+                    break;
+                }
+                case 3: // BL (opposite: TR)
+                {
+                    var right = updated[1].X;
+                    var top = updated[1].Y;
+                    var left = updated[3].X;
+                    var bottom = updated[3].Y;
+                    updated[0] = new CanvasPoint(left, top);
+                    updated[2] = new CanvasPoint(right, bottom);
+                    break;
+                }
+            }
+        }
 
         await HandlesChanged.InvokeAsync(updated);
     }

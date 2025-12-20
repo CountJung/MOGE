@@ -1,0 +1,42 @@
+@using MudBlazor
+@using SharedUI.Components
+
+<MudPaper Elevation="1" Class="pa-2" Style="height: clamp(240px, 70vh, 720px); overflow:auto;">
+    <MudStack Spacing="2">
+        <MudText Typo="Typo.subtitle2">Tools</MudText>
+
+        <MudSelect T="CanvasInteractionMode" Value="@InteractionMode" ValueChanged="InteractionModeChanged" Dense="true" Disabled="@(!HasImage || PerspectiveMode || CropMode)">
+            <MudSelectItem Value="CanvasInteractionMode.PanZoom">Pan/Zoom</MudSelectItem>
+            <MudSelectItem Value="CanvasInteractionMode.Brush">Brush</MudSelectItem>
+            <MudSelectItem Value="CanvasInteractionMode.Eraser">Eraser</MudSelectItem>
+        </MudSelect>
+
+        @if (InteractionMode != CanvasInteractionMode.PanZoom)
+        {
+            <MudText Typo="Typo.caption">Brush Size</MudText>
+            <MudSlider T="int" Value="@BrushRadius" ValueChanged="BrushRadiusChanged" Min="1" Max="64" Step="1" Color="Color.Primary" Disabled="@(!HasImage || PerspectiveMode || CropMode)" />
+        }
+
+        @if (PerspectiveMode)
+        {
+            <MudText Typo="Typo.caption">Perspective mode disables drawing tools.</MudText>
+        }
+
+        @if (CropMode)
+        {
+            <MudText Typo="Typo.caption">Crop mode disables drawing tools.</MudText>
+        }
+    </MudStack>
+</MudPaper>
+
+@code {
+    [Parameter] public bool HasImage { get; set; }
+    [Parameter] public bool PerspectiveMode { get; set; }
+    [Parameter] public bool CropMode { get; set; }
+
+    [Parameter] public CanvasInteractionMode InteractionMode { get; set; }
+    [Parameter] public EventCallback<CanvasInteractionMode> InteractionModeChanged { get; set; }
+
+    [Parameter] public int BrushRadius { get; set; }
+    [Parameter] public EventCallback<int> BrushRadiusChanged { get; set; }
+}

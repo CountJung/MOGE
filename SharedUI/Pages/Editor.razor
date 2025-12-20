@@ -3,6 +3,7 @@
 @implements IDisposable
 
 @using OpenCvSharp
+@using SharedUI.Components
 
 @inject IImageFilePicker ImageFilePicker
 @inject ImageDocumentState Document
@@ -17,11 +18,25 @@
                       Clear="@(EventCallback.Factory.Create(this, Clear))" />
     </MudItem>
 
-    <MudItem xs="12">
+    <MudItem xs="12" md="3" lg="2">
+        <EditorToolBar HasImage="@Document.HasImage"
+                       PerspectiveMode="@_perspectiveMode"
+                       CropMode="@_cropMode"
+                       InteractionMode="@_interactionMode"
+                       InteractionModeChanged="OnInteractionModeChanged"
+                       BrushRadius="@_brushRadius"
+                       BrushRadiusChanged="OnBrushRadiusChanged" />
+    </MudItem>
+
+    <MudItem xs="12" md="9" lg="10">
         <ImageCanvas ImageBytes="@_viewBytes" ContentType="@Document.ContentType"
-                    EnableHandles="@_perspectiveMode"
+                    EnableHandles="@(_perspectiveMode || _cropMode)"
+                    HandlesAsRectangle="@_cropMode"
                     Handles="@_handles"
-                    HandlesChanged="OnHandlesChanged" />
+                    HandlesChanged="OnHandlesChanged"
+                    InteractionMode="@((_perspectiveMode || _cropMode) ? CanvasInteractionMode.PanZoom : _interactionMode)"
+                    BrushRadius="@_brushRadius"
+                    StrokeCommitted="OnStrokeCommittedAsync" />
     </MudItem>
 </MudGrid>
 
@@ -35,9 +50,13 @@
     private int _historyIndex = -1;
 
     private bool _perspectiveMode;
+    private bool _cropMode;
     private List<CanvasPoint> _handles = new();
     private int _imageWidth;
     private int _imageHeight;
+
+    private CanvasInteractionMode _interactionMode = CanvasInteractionMode.PanZoom;
+    private int _brushRadius = 8;
 
     private int _blurKernelSize;
     private bool _grayscale;
@@ -85,6 +104,7 @@
         _debounceCts = null;
 
         _perspectiveMode = false;
+        _cropMode = false;
 
         _history.Clear();
         _historyIndex = -1;
@@ -125,6 +145,7 @@
     private void RefreshRightPanel()
     {
         Layout?.SetRightPanel(RightPanel);
+        Layout?.PushFooterMessage(_status);
     }
 
     private RenderFragment RightPanel => @<EditorRightPanel
@@ -132,6 +153,9 @@
         PerspectiveMode="@_perspectiveMode"
         PerspectiveModeChanged="OnPerspectiveModeChanged"
         ApplyPerspective="ApplyPerspectiveAsync"
+        CropMode="@_cropMode"
+        CropModeChanged="OnCropModeChanged"
+        ApplyCrop="ApplyCropAsync"
         RotateLeft="RotateLeftAsync"
         RotateRight="RotateRightAsync"
         ResizeHalf="ResizeHalfAsync"
@@ -158,7 +182,7 @@
         Reset="ResetToOriginalAsync"
         HistoryItems="@GetHistoryItems()"
         HistoryItemSelected="GoToHistoryAsync"
-        Status="@_status" />;
+        />;
 
     private IReadOnlyList<EditorHistoryListItem> GetHistoryItems()
     {
@@ -177,6 +201,12 @@
     private Task OnPerspectiveModeChanged(bool enabled)
     {
         _perspectiveMode = enabled;
+
+        if (enabled)
+            _interactionMode = CanvasInteractionMode.PanZoom;
+
+        if (enabled)
+            _cropMode = false;
 
         if (!enabled)
         {
@@ -211,10 +241,207 @@
         return Task.CompletedTask;
     }
 
+    private Task OnCropModeChanged(bool enabled)
+    {
+        _cropMode = enabled;
+
+        if (enabled)
+        {
+            _perspectiveMode = false;
+            _interactionMode = CanvasInteractionMode.PanZoom;
+
+            if (!Document.HasImage)
+            {
+                _cropMode = false;
+                RefreshRightPanel();
+                return Task.CompletedTask;
+            }
+
+            var baseBytes = CurrentBytes;
+            _viewBytes = baseBytes;
+
+            (_imageWidth, _imageHeight) = ImageProcessor.GetSize(baseBytes);
+
+            var mx = Math.Max(1, (int)Math.Round(_imageWidth * 0.1));
+            var my = Math.Max(1, (int)Math.Round(_imageHeight * 0.1));
+
+            var x0 = mx;
+            var y0 = my;
+            var x1 = Math.Max(x0 + 1, _imageWidth - mx);
+            var y1 = Math.Max(y0 + 1, _imageHeight - my);
+
+            _handles = new List<CanvasPoint>
+            {
+                new(x0, y0),
+                new(x1, y0),
+                new(x1, y1),
+                new(x0, y1)
+            };
+
+            _status = "Crop: adjust corners";
+            RefreshRightPanel();
+            StateHasChanged();
+            return Task.CompletedTask;
+        }
+
+        _handles = new();
+        _status = null;
+        RefreshRightPanel();
+        StateHasChanged();
+        _ = ApplyPipelineDebouncedAsync();
+        return Task.CompletedTask;
+    }
+
+    private Task OnInteractionModeChanged(CanvasInteractionMode mode)
+    {
+        _interactionMode = mode;
+
+        if (mode != CanvasInteractionMode.PanZoom)
+            _perspectiveMode = false;
+
+        if (mode != CanvasInteractionMode.PanZoom)
+            _cropMode = false;
+
+        _status = mode == CanvasInteractionMode.PanZoom ? null : $"Tool: {mode}";
+        RefreshRightPanel();
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private Task OnBrushRadiusChanged(int radius)
+    {
+        _brushRadius = Math.Clamp(radius, 1, 64);
+        return Task.CompletedTask;
+    }
+
     private Task OnHandlesChanged(IReadOnlyList<CanvasPoint> updated)
     {
+        if (_cropMode)
+        {
+            var xs = updated.Select(p => p.X).ToArray();
+            var ys = updated.Select(p => p.Y).ToArray();
+
+            var minX = Math.Clamp(xs.Min(), 0, _imageWidth);
+            var maxX = Math.Clamp(xs.Max(), 0, _imageWidth);
+            var minY = Math.Clamp(ys.Min(), 0, _imageHeight);
+            var maxY = Math.Clamp(ys.Max(), 0, _imageHeight);
+
+            if (maxX < minX) (minX, maxX) = (maxX, minX);
+            if (maxY < minY) (minY, maxY) = (maxY, minY);
+
+            _handles = new List<CanvasPoint>
+            {
+                new(minX, minY),
+                new(maxX, minY),
+                new(maxX, maxY),
+                new(minX, maxY)
+            };
+
+            return Task.CompletedTask;
+        }
+
         _handles = updated.ToList();
         return Task.CompletedTask;
+    }
+
+    private async Task ApplyCropAsync()
+    {
+        if (!Document.HasImage)
+            return;
+
+        if (!_cropMode)
+            return;
+
+        if (_handles.Count != 4)
+        {
+            _status = "Crop: expected 4 points";
+            RefreshRightPanel();
+            StateHasChanged();
+            return;
+        }
+
+        var minX = _handles.Min(p => p.X);
+        var maxX = _handles.Max(p => p.X);
+        var minY = _handles.Min(p => p.Y);
+        var maxY = _handles.Max(p => p.Y);
+
+        var x0 = (int)Math.Floor(Math.Clamp(minX, 0, _imageWidth - 1));
+        var y0 = (int)Math.Floor(Math.Clamp(minY, 0, _imageHeight - 1));
+        var x1 = (int)Math.Ceiling(Math.Clamp(maxX, x0 + 1, _imageWidth));
+        var y1 = (int)Math.Ceiling(Math.Clamp(maxY, y0 + 1, _imageHeight));
+
+        var w = Math.Max(1, x1 - x0);
+        var h = Math.Max(1, y1 - y0);
+
+        _status = "Cropping...";
+        RefreshRightPanel();
+        StateHasChanged();
+
+        var baseBytes = CurrentBytes!;
+        byte[] cropped;
+        try
+        {
+            cropped = await Task.Run(() => ImageProcessor.Crop(baseBytes, x0, y0, w, h));
+        }
+        catch (Exception ex)
+        {
+            _status = ex.Message;
+            RefreshRightPanel();
+            StateHasChanged();
+            return;
+        }
+
+        _cropMode = false;
+        _handles = new();
+        CommitHistory(cropped, "Crop");
+
+        _status = "Crop applied";
+        RefreshRightPanel();
+        StateHasChanged();
+
+        await ApplyPipelineDebouncedAsync();
+    }
+
+    private async Task OnStrokeCommittedAsync(CanvasStroke stroke)
+    {
+        if (!Document.HasImage)
+            return;
+
+        if (_perspectiveMode)
+            return;
+
+        if (_cropMode)
+            return;
+
+        if (stroke.Points is null || stroke.Points.Count < 1)
+            return;
+
+        _status = "Drawing...";
+        RefreshRightPanel();
+        StateHasChanged();
+
+        var baseBytes = CurrentBytes!;
+        byte[] next;
+        try
+        {
+            var radius = Math.Clamp(_brushRadius, 1, 64);
+            next = await Task.Run(() => ImageProcessor.ApplyStroke(baseBytes, stroke.Mode, stroke.Points, radius));
+        }
+        catch (Exception ex)
+        {
+            _status = ex.Message;
+            RefreshRightPanel();
+            StateHasChanged();
+            return;
+        }
+
+        CommitHistory(next, stroke.Mode == CanvasInteractionMode.Eraser ? "Eraser" : "Brush");
+
+        _status = "Stroke applied";
+        RefreshRightPanel();
+        StateHasChanged();
+
+        await ApplyPipelineDebouncedAsync();
     }
 
     private async Task ApplyPerspectiveAsync()

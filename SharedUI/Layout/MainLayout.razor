@@ -1,4 +1,5 @@
 @inherits LayoutComponentBase
+@using Microsoft.AspNetCore.Components.Web
 
 <CascadingValue Value="this" IsFixed="true">
     <MudThemeProvider IsDarkMode="_isDarkMode" />
@@ -8,6 +9,7 @@
 
     <MudBreakpointProvider OnBreakpointChanged="OnBreakpointChanged" />
 
+    <div tabindex="0" style="outline:none;" @onkeydown="OnKeyDown" @onkeydown:preventDefault="true">
     <MudLayout>
         <MudAppBar Dense="true">
             <MudHidden Breakpoint="Breakpoint.MdAndUp">
@@ -65,11 +67,29 @@
         </MudDrawer>
 
         <MudMainContent>
-            <MudContainer MaxWidth="MaxWidth.False" Class="pa-0">
+            <MudContainer MaxWidth="MaxWidth.False" Class="pa-0" Style="padding-bottom: 96px;">
                 @Body
             </MudContainer>
         </MudMainContent>
+
+        <MudPaper Square="true" Elevation="0" Class="px-3 py-2"
+                  Style="position:fixed; left:0; right:0; bottom:0; border-top:1px solid var(--mud-palette-lines-default); z-index: 1200;">
+            <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                <MudStack Spacing="0">
+                    @foreach (var msg in VisibleFooterMessages)
+                    {
+                        <MudText Typo="Typo.caption">@msg</MudText>
+                    }
+                </MudStack>
+
+                <MudStack Row="true" Spacing="0" AlignItems="AlignItems.Center">
+                    <MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowUp" Disabled="@(!CanScrollOlder)" OnClick="ScrollOlder" aria-label="Footer: Older messages" />
+                    <MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowDown" Disabled="@(!CanScrollNewer)" OnClick="ScrollNewer" aria-label="Footer: Newer messages" />
+                </MudStack>
+            </MudStack>
+        </MudPaper>
     </MudLayout>
+    </div>
 </CascadingValue>
 
 @code {
@@ -90,10 +110,87 @@
 
     protected RenderFragment? RightPanel { get; set; }
 
+    private const int FooterMaxMessages = 30;
+    private const int FooterPageSize = 3;
+    private readonly List<string> _footerMessages = new();
+    private int _footerPageOffset;
+
     public void SetRightPanel(RenderFragment? fragment)
     {
         RightPanel = fragment;
         StateHasChanged();
+    }
+
+    public void SetFooterMessage(string? message) => PushFooterMessage(message);
+
+    public void PushFooterMessage(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+            return;
+
+        // Avoid spamming identical consecutive messages.
+        if (_footerMessages.Count > 0 && string.Equals(_footerMessages[^1], message, StringComparison.Ordinal))
+            return;
+
+        _footerMessages.Add(message);
+
+        if (_footerMessages.Count > FooterMaxMessages)
+            _footerMessages.RemoveRange(0, _footerMessages.Count - FooterMaxMessages);
+
+        _footerPageOffset = 0;
+        StateHasChanged();
+    }
+
+    private IEnumerable<string> VisibleFooterMessages
+    {
+        get
+        {
+            if (_footerMessages.Count == 0)
+                return Array.Empty<string>();
+
+            var endExclusive = Math.Max(0, _footerMessages.Count - (_footerPageOffset * FooterPageSize));
+            var start = Math.Max(0, endExclusive - FooterPageSize);
+            if (endExclusive <= start)
+                return Array.Empty<string>();
+
+            return _footerMessages.GetRange(start, endExclusive - start);
+        }
+    }
+
+    private bool CanScrollOlder => _footerMessages.Count - ((_footerPageOffset + 1) * FooterPageSize) > 0;
+    private bool CanScrollNewer => _footerPageOffset > 0;
+
+    private void ScrollOlder()
+    {
+        if (!CanScrollOlder)
+            return;
+
+        _footerPageOffset++;
+        StateHasChanged();
+    }
+
+    private void ScrollNewer()
+    {
+        if (!CanScrollNewer)
+            return;
+
+        _footerPageOffset--;
+        StateHasChanged();
+    }
+
+    private void OnKeyDown(KeyboardEventArgs e)
+    {
+        if (string.Equals(e.Key, "ArrowUp", StringComparison.OrdinalIgnoreCase))
+        {
+            ScrollOlder();
+            return;
+        }
+
+        if (string.Equals(e.Key, "ArrowDown", StringComparison.OrdinalIgnoreCase))
+        {
+            ScrollNewer();
+            return;
+        }
     }
 
     private DrawerVariant LeftVariant => _isMobile ? DrawerVariant.Temporary : DrawerVariant.Persistent;

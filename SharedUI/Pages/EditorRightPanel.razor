@@ -3,13 +3,20 @@
 <MudStack Spacing="2">
     <MudSwitch T="bool" Value="@PerspectiveMode" ValueChanged="PerspectiveModeChanged" Color="Color.Primary" Label="Perspective Mode" />
 
+    <MudSwitch T="bool" Value="@CropMode" ValueChanged="CropModeChanged" Color="Color.Primary" Label="Crop Mode" Disabled="@PerspectiveMode" />
+
     @if (PerspectiveMode)
     {
         <MudText Typo="Typo.caption">Drag the 4 points on the canvas, then apply.</MudText>
         <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(!HasImage)" OnClick="@(async () => await ApplyPerspective.InvokeAsync())">Apply Perspective</MudButton>
     }
 
-    <MudDivider />
+    @if (CropMode)
+    {
+        <MudText Typo="Typo.caption">Drag the 4 corners, then apply crop.</MudText>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(!HasImage)" OnClick="@(async () => await ApplyCrop.InvokeAsync())">Apply Crop</MudButton>
+    }
+
     <MudText Typo="Typo.subtitle2">Transform</MudText>
     <MudStack Row="true" Spacing="1">
         <MudButton Variant="Variant.Outlined" Disabled="@(!HasImage)" OnClick="@(async () => await RotateLeft.InvokeAsync())">Rotate Left</MudButton>
@@ -68,10 +75,6 @@
         }
     </MudList>
 
-    @if (!string.IsNullOrWhiteSpace(Status))
-    {
-        <MudText Typo="Typo.caption">@Status</MudText>
-    }
 </MudStack>
 
 @code {
@@ -79,6 +82,11 @@
 
     [Parameter] public bool PerspectiveMode { get; set; }
     [Parameter] public EventCallback<bool> PerspectiveModeChanged { get; set; }
+
+    [Parameter] public bool CropMode { get; set; }
+    [Parameter] public EventCallback<bool> CropModeChanged { get; set; }
+
+    [Parameter] public EventCallback ApplyCrop { get; set; }
 
     [Parameter] public EventCallback ApplyPerspective { get; set; }
 
@@ -120,5 +128,4 @@
     [Parameter] public IReadOnlyList<EditorHistoryListItem>? HistoryItems { get; set; }
     [Parameter] public EventCallback<int> HistoryItemSelected { get; set; }
 
-    [Parameter] public string? Status { get; set; }
 }

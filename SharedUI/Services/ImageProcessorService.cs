@@ -1,5 +1,6 @@
 using OpenCvSharp;
 using System.Runtime.InteropServices;
+using SharedUI.Components;
 using SharedUI.Services.Raw;
 
 namespace SharedUI.Services;
@@ -29,7 +30,8 @@ public sealed class ImageProcessorService
             return ApplyPipelineBrowser(imageBytes, settings);
 
         using var src = Decode(imageBytes);
-        using var work = src.Clone();
+        using var split = SplitBgrAndAlpha(src);
+        using var work = split.Bgr.Clone();
 
         if (Math.Abs(settings.Contrast - 1.0) > 0.0001 || Math.Abs(settings.Brightness) > 0.0001)
         {
@@ -85,6 +87,12 @@ public sealed class ImageProcessorService
             using var dst = new Mat();
             Cv2.CvtColor(edges, dst, ColorConversionCodes.GRAY2BGR);
             dst.CopyTo(work);
+        }
+
+        if (split.Alpha is not null)
+        {
+            using var merged = MergeBgrAndAlpha(work, split.Alpha);
+            return EncodeForDisplay(merged);
         }
 
         return EncodeForDisplay(work);
@@ -164,8 +172,17 @@ public sealed class ImageProcessorService
         kernelSize = NormalizeOddKernel(kernelSize);
 
         using var src = Decode(imageBytes);
+        using var split = SplitBgrAndAlpha(src);
+
         using var dst = new Mat();
-        Cv2.GaussianBlur(src, dst, new Size(kernelSize, kernelSize), 0);
+        Cv2.GaussianBlur(split.Bgr, dst, new Size(kernelSize, kernelSize), 0);
+
+        if (split.Alpha is not null)
+        {
+            using var merged = MergeBgrAndAlpha(dst, split.Alpha);
+            return EncodeForDisplay(merged);
+        }
+
         return EncodeForDisplay(dst);
     }
 
@@ -179,14 +196,22 @@ public sealed class ImageProcessorService
         }
 
         using var src = Decode(imageBytes);
+        using var split = SplitBgrAndAlpha(src);
+
         using var gray = new Mat();
-        Cv2.CvtColor(src, gray, ColorConversionCodes.BGR2GRAY);
+        Cv2.CvtColor(split.Bgr, gray, ColorConversionCodes.BGR2GRAY);
 
         using var edges = new Mat();
         Cv2.Canny(gray, edges, threshold1, threshold2);
 
         using var dst = new Mat();
         Cv2.CvtColor(edges, dst, ColorConversionCodes.GRAY2BGR);
+
+        if (split.Alpha is not null)
+        {
+            using var merged = MergeBgrAndAlpha(dst, split.Alpha);
+            return EncodeForDisplay(merged);
+        }
 
         return EncodeForDisplay(dst);
     }
@@ -201,11 +226,19 @@ public sealed class ImageProcessorService
         }
 
         using var src = Decode(imageBytes);
+        using var split = SplitBgrAndAlpha(src);
+
         using var gray = new Mat();
-        Cv2.CvtColor(src, gray, ColorConversionCodes.BGR2GRAY);
+        Cv2.CvtColor(split.Bgr, gray, ColorConversionCodes.BGR2GRAY);
 
         using var dst = new Mat();
         Cv2.CvtColor(gray, dst, ColorConversionCodes.GRAY2BGR);
+
+        if (split.Alpha is not null)
+        {
+            using var merged = MergeBgrAndAlpha(dst, split.Alpha);
+            return EncodeForDisplay(merged);
+        }
 
         return EncodeForDisplay(dst);
     }
@@ -220,8 +253,10 @@ public sealed class ImageProcessorService
         }
 
         using var src = Decode(imageBytes);
+        using var split = SplitBgrAndAlpha(src);
+
         using var src32 = new Mat();
-        src.ConvertTo(src32, MatType.CV_32FC3, 1.0 / 255.0);
+        split.Bgr.ConvertTo(src32, MatType.CV_32FC3, 1.0 / 255.0);
 
         using var sepiaKernel = new Mat(3, 3, MatType.CV_32FC1);
         sepiaKernel.SetArray<float>(
@@ -236,6 +271,12 @@ public sealed class ImageProcessorService
         using var dst8 = new Mat();
         dst32.ConvertTo(dst8, MatType.CV_8UC3, 255.0);
 
+        if (split.Alpha is not null)
+        {
+            using var merged = MergeBgrAndAlpha(dst8, split.Alpha);
+            return EncodeForDisplay(merged);
+        }
+
         return EncodeForDisplay(dst8);
     }
 
@@ -249,8 +290,17 @@ public sealed class ImageProcessorService
         }
 
         using var src = Decode(imageBytes);
+        using var split = SplitBgrAndAlpha(src);
+
         using var dst = new Mat();
-        src.ConvertTo(dst, MatType.CV_8UC3, contrast, brightness);
+        split.Bgr.ConvertTo(dst, MatType.CV_8UC3, contrast, brightness);
+
+        if (split.Alpha is not null)
+        {
+            using var merged = MergeBgrAndAlpha(dst, split.Alpha);
+            return EncodeForDisplay(merged);
+        }
+
         return EncodeForDisplay(dst);
     }
 
@@ -267,10 +317,20 @@ public sealed class ImageProcessorService
         }
 
         using var src = Decode(imageBytes);
+        using var split = SplitBgrAndAlpha(src);
         using var transform = Cv2.GetPerspectiveTransform(srcQuad, dstQuad);
 
         using var dst = new Mat();
-        Cv2.WarpPerspective(src, dst, transform, new Size(outWidth, outHeight));
+        Cv2.WarpPerspective(split.Bgr, dst, transform, new Size(outWidth, outHeight));
+
+        if (split.Alpha is not null)
+        {
+            using var alpha = new Mat();
+            Cv2.WarpPerspective(split.Alpha, alpha, transform, new Size(outWidth, outHeight), InterpolationFlags.Linear, BorderTypes.Constant, Scalar.All(0));
+            using var merged = MergeBgrAndAlpha(dst, alpha);
+            return EncodeForDisplay(merged);
+        }
+
         return EncodeForDisplay(dst);
     }
 
@@ -284,8 +344,19 @@ public sealed class ImageProcessorService
         }
 
         using var src = Decode(imageBytes);
+        using var split = SplitBgrAndAlpha(src);
+
         using var dst = new Mat();
-        Cv2.Rotate(src, dst, rotateFlags);
+        Cv2.Rotate(split.Bgr, dst, rotateFlags);
+
+        if (split.Alpha is not null)
+        {
+            using var alpha = new Mat();
+            Cv2.Rotate(split.Alpha, alpha, rotateFlags);
+            using var merged = MergeBgrAndAlpha(dst, alpha);
+            return EncodeForDisplay(merged);
+        }
+
         return EncodeForDisplay(dst);
     }
 
@@ -304,9 +375,182 @@ public sealed class ImageProcessorService
         }
 
         using var src = Decode(imageBytes);
+        using var split = SplitBgrAndAlpha(src);
+
         using var dst = new Mat();
-        Cv2.Resize(src, dst, new Size(), scale, scale, InterpolationFlags.Area);
+        Cv2.Resize(split.Bgr, dst, new Size(), scale, scale, InterpolationFlags.Area);
+
+        if (split.Alpha is not null)
+        {
+            using var alpha = new Mat();
+            Cv2.Resize(split.Alpha, alpha, new Size(), scale, scale, InterpolationFlags.Area);
+            using var merged = MergeBgrAndAlpha(dst, alpha);
+            return EncodeForDisplay(merged);
+        }
+
         return EncodeForDisplay(dst);
+    }
+
+    public byte[] Crop(byte[] imageBytes, int x, int y, int width, int height)
+    {
+        if (width <= 0)
+            throw new ArgumentOutOfRangeException(nameof(width));
+        if (height <= 0)
+            throw new ArgumentOutOfRangeException(nameof(height));
+
+        if (OperatingSystem.IsBrowser())
+        {
+            var raw = GetRawOrThrow(imageBytes);
+            var cropped = Raw.RgbaImageOps.Crop(raw, x, y, width, height);
+            return ReturnToken(cropped);
+        }
+
+        using var src = Decode(imageBytes);
+
+        x = Math.Clamp(x, 0, src.Width - 1);
+        y = Math.Clamp(y, 0, src.Height - 1);
+        width = Math.Clamp(width, 1, src.Width - x);
+        height = Math.Clamp(height, 1, src.Height - y);
+
+        var rect = new Rect(x, y, width, height);
+        using var roi = new Mat(src, rect);
+        using var croppedMat = roi.Clone();
+        return EncodeForDisplay(croppedMat);
+    }
+
+    public byte[] ApplyStroke(byte[] imageBytes, CanvasInteractionMode mode, IReadOnlyList<CanvasPoint> points, int radius)
+    {
+        if (points is null)
+            throw new ArgumentNullException(nameof(points));
+
+        radius = Math.Clamp(radius, 1, 256);
+        if (points.Count < 2)
+            return imageBytes;
+
+        if (OperatingSystem.IsBrowser())
+        {
+            var raw = GetRawOrThrow(imageBytes);
+            var next = ApplyStrokeToRgba(raw, mode, points, radius);
+            return ReturnToken(next);
+        }
+
+        using var src = Decode(imageBytes);
+        using var split = SplitBgrAndAlpha(src);
+
+        using var work = split.Bgr.Clone();
+        using var alpha = split.Alpha?.Clone() ?? new Mat(work.Rows, work.Cols, MatType.CV_8UC1, Scalar.All(255));
+
+        var thickness = Math.Max(1, radius * 2);
+
+        var isEraser = mode == CanvasInteractionMode.Eraser;
+        var brushColor = new Scalar(255, 255, 255); // BGR: white
+        var alphaBrush = new Scalar(255);
+        var alphaErase = new Scalar(0);
+
+        for (var i = 1; i < points.Count; i++)
+        {
+            var a = points[i - 1];
+            var b = points[i];
+
+            var p1 = new Point((int)Math.Round(a.X), (int)Math.Round(a.Y));
+            var p2 = new Point((int)Math.Round(b.X), (int)Math.Round(b.Y));
+
+            if (isEraser)
+            {
+                // Make transparent.
+                Cv2.Line(alpha, p1, p2, alphaErase, thickness, LineTypes.AntiAlias);
+                // Also clear color to avoid fringes when composited elsewhere.
+                Cv2.Line(work, p1, p2, Scalar.All(0), thickness, LineTypes.AntiAlias);
+            }
+            else
+            {
+                // Paint opaque white.
+                Cv2.Line(work, p1, p2, brushColor, thickness, LineTypes.AntiAlias);
+                Cv2.Line(alpha, p1, p2, alphaBrush, thickness, LineTypes.AntiAlias);
+            }
+        }
+
+        using var merged = MergeBgrAndAlpha(work, alpha);
+        return EncodeForDisplay(merged);
+    }
+
+    private static RawRgbaImage ApplyStrokeToRgba(RawRgbaImage src, CanvasInteractionMode mode, IReadOnlyList<CanvasPoint> points, int radius)
+    {
+        if (src.Width <= 0 || src.Height <= 0)
+            return src;
+
+        if (src.RgbaBytes is null || src.RgbaBytes.Length < src.Width * src.Height * 4)
+            return src;
+
+        var dst = src.RgbaBytes.ToArray();
+        var isEraser = mode == CanvasInteractionMode.Eraser;
+
+        for (var i = 1; i < points.Count; i++)
+        {
+            var a = points[i - 1];
+            var b = points[i];
+            DrawSegment(dst, src.Width, src.Height, a, b, radius, isEraser);
+        }
+
+        return new RawRgbaImage(src.Width, src.Height, dst);
+    }
+
+    private static void DrawSegment(byte[] rgba, int width, int height, CanvasPoint a, CanvasPoint b, int radius, bool erase)
+    {
+        var dx = b.X - a.X;
+        var dy = b.Y - a.Y;
+
+        var steps = (int)Math.Ceiling(Math.Max(Math.Abs(dx), Math.Abs(dy)));
+        steps = Math.Max(1, steps);
+
+        for (var s = 0; s <= steps; s++)
+        {
+            var t = s / (double)steps;
+            var x = (int)Math.Round(a.X + dx * t);
+            var y = (int)Math.Round(a.Y + dy * t);
+            DrawFilledCircle(rgba, width, height, x, y, radius, erase);
+        }
+    }
+
+    private static void DrawFilledCircle(byte[] rgba, int width, int height, int cx, int cy, int radius, bool erase)
+    {
+        if (radius <= 0)
+            return;
+
+        var r2 = radius * radius;
+        var y0 = Math.Max(0, cy - radius);
+        var y1 = Math.Min(height - 1, cy + radius);
+
+        for (var y = y0; y <= y1; y++)
+        {
+            var dy = y - cy;
+            var dxMax = (int)Math.Floor(Math.Sqrt(r2 - dy * dy));
+
+            var x0 = Math.Max(0, cx - dxMax);
+            var x1 = Math.Min(width - 1, cx + dxMax);
+
+            var row = y * width;
+            for (var x = x0; x <= x1; x++)
+            {
+                var idx = (row + x) * 4;
+                if (erase)
+                {
+                    // Eraser: make pixels transparent.
+                    rgba[idx + 0] = 0;
+                    rgba[idx + 1] = 0;
+                    rgba[idx + 2] = 0;
+                    rgba[idx + 3] = 0;
+                }
+                else
+                {
+                    // Brush: paint white.
+                    rgba[idx + 0] = 255;
+                    rgba[idx + 1] = 255;
+                    rgba[idx + 2] = 255;
+                    rgba[idx + 3] = 255;
+                }
+            }
+        }
     }
 
     public (int width, int height) GetSize(byte[]? bytes)
@@ -377,7 +621,8 @@ public sealed class ImageProcessorService
         // 1) Normal decode path (works on native platforms)
         try
         {
-            var src = Cv2.ImDecode(imageBytes, ImreadModes.Color);
+            // Preserve alpha channel when present.
+            var src = Cv2.ImDecode(imageBytes, ImreadModes.Unchanged);
             if (!src.Empty())
                 return src;
         }
@@ -414,6 +659,7 @@ public sealed class ImageProcessorService
         using var rgba = new Mat(raw.Height, raw.Width, MatType.CV_8UC4);
         Marshal.Copy(raw.RgbaBytes, 0, rgba.Data, expected);
 
+        // Most native paths operate on BGR; alpha-preserving pipeline handles native PNG alpha separately.
         var bgr = new Mat();
         Cv2.CvtColor(rgba, bgr, ColorConversionCodes.RGBA2BGR);
         return bgr;
@@ -455,7 +701,7 @@ public sealed class ImageProcessorService
         return "unknown";
     }
 
-    private byte[] EncodeForDisplay(Mat bgr)
+    private byte[] EncodeForDisplay(Mat mat)
     {
         // Browser: avoid Cv2.ImEncode entirely (it may throw a native exception that bypasses managed catch).
         if (OperatingSystem.IsBrowser())
@@ -463,7 +709,7 @@ public sealed class ImageProcessorService
             if (_raw is IRawImageCache browserCache)
             {
                 var token = RawToken.Create();
-                browserCache.Set(ImageSignature.Create(token), ExtractRgba(bgr));
+                browserCache.Set(ImageSignature.Create(token), ExtractRgba(mat));
                 return token;
             }
 
@@ -473,9 +719,9 @@ public sealed class ImageProcessorService
         // 1) Try PNG
         try
         {
-            Cv2.ImEncode(".png", bgr, out var buf);
+            Cv2.ImEncode(".png", mat, out var buf);
             var png = buf.ToArray();
-            CacheRawIfPossible(png, bgr);
+            CacheRawIfPossible(png, mat);
             return png;
         }
         catch (Exception ex) when (IsMissingEncoder(ex))
@@ -483,12 +729,25 @@ public sealed class ImageProcessorService
             // fall through
         }
 
+        // If the image contains alpha, do not attempt BMP (it would drop transparency).
+        if (mat.Channels() == 4)
+        {
+            if (_raw is IRawImageCache cacheWithAlpha)
+            {
+                var token = RawToken.Create();
+                cacheWithAlpha.Set(ImageSignature.Create(token), ExtractRgba(mat));
+                return token;
+            }
+
+            throw new InvalidOperationException("OpenCV PNG encoder is unavailable in this runtime.");
+        }
+
         // 2) Try BMP
         try
         {
-            Cv2.ImEncode(".bmp", bgr, out var bmp);
+            Cv2.ImEncode(".bmp", mat, out var bmp);
             var bytes = bmp.ToArray();
-            CacheRawIfPossible(bytes, bgr);
+            CacheRawIfPossible(bytes, mat);
             return bytes;
         }
         catch (Exception ex) when (IsMissingEncoder(ex))
@@ -500,7 +759,7 @@ public sealed class ImageProcessorService
         if (_raw is IRawImageCache cache)
         {
             var token = RawToken.Create();
-            var raw = ExtractRgba(bgr);
+            var raw = ExtractRgba(mat);
             cache.Set(ImageSignature.Create(token), raw);
             return token;
         }
@@ -511,10 +770,13 @@ public sealed class ImageProcessorService
     private static bool IsMissingEncoder(Exception ex)
         => ex.Message?.Contains("could not find encoder", StringComparison.OrdinalIgnoreCase) == true;
 
-    private static RawRgbaImage ExtractRgba(Mat bgr)
+    private static RawRgbaImage ExtractRgba(Mat mat)
     {
         using var rgba = new Mat();
-        Cv2.CvtColor(bgr, rgba, ColorConversionCodes.BGR2RGBA);
+        if (mat.Channels() == 4)
+            Cv2.CvtColor(mat, rgba, ColorConversionCodes.BGRA2RGBA);
+        else
+            Cv2.CvtColor(mat, rgba, ColorConversionCodes.BGR2RGBA);
 
         var expected = checked(rgba.Width * rgba.Height * 4);
         var managed = new byte[expected];
@@ -549,7 +811,7 @@ public sealed class ImageProcessorService
         return (w, h);
     }
 
-    private void CacheRawIfPossible(byte[] encodedBytes, Mat bgr)
+    private void CacheRawIfPossible(byte[] encodedBytes, Mat mat)
     {
         if (_raw is not IRawImageCache cache)
             return;
@@ -557,11 +819,55 @@ public sealed class ImageProcessorService
         try
         {
             var sig = ImageSignature.Create(encodedBytes);
-            cache.Set(sig, ExtractRgba(bgr));
+            cache.Set(sig, ExtractRgba(mat));
         }
         catch
         {
         }
+    }
+
+    private sealed class BgrAlphaSplit : IDisposable
+    {
+        public required Mat Bgr { get; init; }
+        public Mat? Alpha { get; init; }
+
+        public void Dispose()
+        {
+            Bgr.Dispose();
+            Alpha?.Dispose();
+        }
+    }
+
+    private static BgrAlphaSplit SplitBgrAndAlpha(Mat src)
+    {
+        if (src.Empty())
+            throw new InvalidOperationException("Source image is empty.");
+
+        return src.Channels() switch
+        {
+            3 => new BgrAlphaSplit { Bgr = src.Clone(), Alpha = null },
+            4 => SplitBgra(src),
+            _ => throw new InvalidOperationException($"Unsupported channel count: {src.Channels()}"),
+        };
+
+        static BgrAlphaSplit SplitBgra(Mat bgra)
+        {
+            var bgr = new Mat();
+            Cv2.CvtColor(bgra, bgr, ColorConversionCodes.BGRA2BGR);
+
+            var alpha = new Mat();
+            Cv2.ExtractChannel(bgra, alpha, 3);
+
+            return new BgrAlphaSplit { Bgr = bgr, Alpha = alpha };
+        }
+    }
+
+    private static Mat MergeBgrAndAlpha(Mat bgr, Mat alpha)
+    {
+        var bgra = new Mat();
+        Cv2.CvtColor(bgr, bgra, ColorConversionCodes.BGR2BGRA);
+        Cv2.InsertChannel(alpha, bgra, 3);
+        return bgra;
     }
 
     private static int NormalizeOddKernel(int kernelSize)

@@ -340,6 +340,36 @@ internal static class RgbaImageOps
         return new RawRgbaImage(newWidth, newHeight, dst);
     }
 
+    public static RawRgbaImage Crop(in RawRgbaImage src, int x, int y, int width, int height)
+    {
+        if (src.Width <= 0 || src.Height <= 0)
+            return src;
+
+        if (src.RgbaBytes is null || src.RgbaBytes.Length < src.Width * src.Height * 4)
+            return src;
+
+        x = Math.Clamp(x, 0, src.Width - 1);
+        y = Math.Clamp(y, 0, src.Height - 1);
+        width = Math.Clamp(width, 1, src.Width - x);
+        height = Math.Clamp(height, 1, src.Height - y);
+
+        if (x == 0 && y == 0 && width == src.Width && height == src.Height)
+            return src;
+
+        var dst = new byte[width * height * 4];
+        var srcStride = src.Width * 4;
+        var dstStride = width * 4;
+
+        for (var row = 0; row < height; row++)
+        {
+            var srcOffset = ((y + row) * src.Width + x) * 4;
+            var dstOffset = row * dstStride;
+            Buffer.BlockCopy(src.RgbaBytes, srcOffset, dst, dstOffset, dstStride);
+        }
+
+        return new RawRgbaImage(width, height, dst);
+    }
+
     public static RawRgbaImage WarpPerspective(in RawRgbaImage src, Point2f[] srcQuad, Point2f[] dstQuad, int outWidth, int outHeight)
     {
         if (srcQuad.Length != 4 || dstQuad.Length != 4)
