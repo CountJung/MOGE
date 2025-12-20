@@ -6,6 +6,13 @@ MAUI Blazor Hybrid + Blazor WebAssembly로 동작하는 간단한 이미지 편�
 - **HybridApp (MAUI Blazor Hybrid)**: 네이티브(Windows 등) 호스트
 - **WebApp (Blazor WASM)**: 브라우저 호스트
 
+## 🌐 온라인 데모
+
+WebApp은 GitHub Pages에 자동으로 배포됩니다:
+- **https://countjung.github.io/MOGE/**
+
+배포 설정 및 상세 정보는 [DEPLOYMENT.md](DEPLOYMENT.md)를 참고하세요.
+
 ## 핵심 아이디어
 
 ### 브라우저(WASM)에서의 이미지 처리 제약과 우회
