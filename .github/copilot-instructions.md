@@ -66,6 +66,7 @@
 
 ## 변경 작업 시 가이드 (우선순위)
 - 공용 UI/기능은 **먼저 SharedUI에 구현**하고, 플랫폼별 차이는 Host(WebApp/HybridApp)에서 DI/서비스로 분기합니다.
+- 페이지가 복잡해지면 `.razor`의 `@code` 블록 안에서 큰 `RenderFragment`를 직접 구성하지 말고, **별도 컴포넌트(.razor) 파일로 분리**한 뒤 파라미터/콜백으로 연결합니다(예: `SharedUI/Pages/EditorRightPanel.razor`).
 - 브라우저에서 이미지 처리 코드를 수정할 때:
   - “파일 포맷 bytes” 대신 “RawToken/Raw RGBA 캐시”가 흘러갈 수 있음을 항상 고려합니다.
   - Raw 캐시 miss 시 동작(예외/메시지)을 깨지지 않게 유지합니다.

@@ -1,0 +1,124 @@
+@using MudBlazor
+
+<MudStack Spacing="2">
+    <MudSwitch T="bool" Value="@PerspectiveMode" ValueChanged="PerspectiveModeChanged" Color="Color.Primary" Label="Perspective Mode" />
+
+    @if (PerspectiveMode)
+    {
+        <MudText Typo="Typo.caption">Drag the 4 points on the canvas, then apply.</MudText>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(!HasImage)" OnClick="@(async () => await ApplyPerspective.InvokeAsync())">Apply Perspective</MudButton>
+    }
+
+    <MudDivider />
+    <MudText Typo="Typo.subtitle2">Transform</MudText>
+    <MudStack Row="true" Spacing="1">
+        <MudButton Variant="Variant.Outlined" Disabled="@(!HasImage)" OnClick="@(async () => await RotateLeft.InvokeAsync())">Rotate Left</MudButton>
+        <MudButton Variant="Variant.Outlined" Disabled="@(!HasImage)" OnClick="@(async () => await RotateRight.InvokeAsync())">Rotate Right</MudButton>
+    </MudStack>
+    <MudButton Variant="Variant.Outlined" Disabled="@(!HasImage)" OnClick="@(async () => await ResizeHalf.InvokeAsync())">Resize 50%</MudButton>
+
+    <MudDivider />
+    <MudText Typo="Typo.subtitle2">Filters</MudText>
+
+    <MudText Typo="Typo.caption">Blur Kernel</MudText>
+    <MudSlider T="int" Value="@BlurKernelSize" ValueChanged="BlurKernelSizeChanged" Min="0" Max="31" Step="1" Color="Color.Primary" />
+
+    <MudSwitch T="bool" Value="@Grayscale" ValueChanged="GrayscaleChanged" Color="Color.Primary" Label="Grayscale" Disabled="@Sepia" />
+    <MudSwitch T="bool" Value="@Sepia" ValueChanged="SepiaChanged" Color="Color.Primary" Label="Sepia" />
+
+    <MudSwitch T="bool" Value="@Canny" ValueChanged="CannyChanged" Color="Color.Primary" Label="Canny Edge" />
+
+    @if (Canny)
+    {
+        <MudText Typo="Typo.caption">Canny T1</MudText>
+        <MudSlider T="double" Value="@CannyT1" ValueChanged="CannyT1Changed" Min="0" Max="255" Step="1" Color="Color.Primary" />
+        <MudText Typo="Typo.caption">Canny T2</MudText>
+        <MudSlider T="double" Value="@CannyT2" ValueChanged="CannyT2Changed" Min="0" Max="255" Step="1" Color="Color.Primary" />
+    }
+
+    <MudText Typo="Typo.caption">Contrast</MudText>
+    <MudSlider T="double" Value="@Contrast" ValueChanged="ContrastChanged" Min="0.5" Max="3.0" Step="0.05" Color="Color.Primary" />
+    <MudText Typo="Typo.caption">Brightness</MudText>
+    <MudSlider T="double" Value="@Brightness" ValueChanged="BrightnessChanged" Min="-100" Max="100" Step="1" Color="Color.Primary" />
+
+    <MudDivider />
+    <MudText Typo="Typo.subtitle2">History</MudText>
+    <MudStack Row="true" Spacing="1">
+        <MudButton Variant="Variant.Outlined" Disabled="@(!CanUndo)" OnClick="@(async () => await Undo.InvokeAsync())">Undo</MudButton>
+        <MudButton Variant="Variant.Outlined" Disabled="@(!CanRedo)" OnClick="@(async () => await Redo.InvokeAsync())">Redo</MudButton>
+        <MudButton Variant="Variant.Outlined" Disabled="@(!CanUndo)" OnClick="@(async () => await Reset.InvokeAsync())">Reset</MudButton>
+    </MudStack>
+
+    <MudList T="string" Dense="true">
+        @if (HistoryItems is not null)
+        {
+            @foreach (var item in HistoryItems)
+            {
+                var idx = item.Index;
+                <MudListItem T="string" Value="@item.DisplayLabel" OnClick="@(async () => await HistoryItemSelected.InvokeAsync(idx))" Disabled="@(!HasImage)">
+                    <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                        @if (!string.IsNullOrWhiteSpace(item.ThumbnailDataUrl))
+                        {
+                            <img src="@item.ThumbnailDataUrl" width="40" height="40" style="object-fit:contain" />
+                        }
+                        <MudText Typo="Typo.caption">@item.DisplayLabel</MudText>
+                    </MudStack>
+                </MudListItem>
+            }
+        }
+    </MudList>
+
+    @if (!string.IsNullOrWhiteSpace(Status))
+    {
+        <MudText Typo="Typo.caption">@Status</MudText>
+    }
+</MudStack>
+
+@code {
+    [Parameter] public bool HasImage { get; set; }
+
+    [Parameter] public bool PerspectiveMode { get; set; }
+    [Parameter] public EventCallback<bool> PerspectiveModeChanged { get; set; }
+
+    [Parameter] public EventCallback ApplyPerspective { get; set; }
+
+    [Parameter] public EventCallback RotateLeft { get; set; }
+    [Parameter] public EventCallback RotateRight { get; set; }
+    [Parameter] public EventCallback ResizeHalf { get; set; }
+
+    [Parameter] public int BlurKernelSize { get; set; }
+    [Parameter] public EventCallback<int> BlurKernelSizeChanged { get; set; }
+
+    [Parameter] public bool Grayscale { get; set; }
+    [Parameter] public EventCallback<bool> GrayscaleChanged { get; set; }
+
+    [Parameter] public bool Sepia { get; set; }
+    [Parameter] public EventCallback<bool> SepiaChanged { get; set; }
+
+    [Parameter] public bool Canny { get; set; }
+    [Parameter] public EventCallback<bool> CannyChanged { get; set; }
+
+    [Parameter] public double CannyT1 { get; set; }
+    [Parameter] public EventCallback<double> CannyT1Changed { get; set; }
+
+    [Parameter] public double CannyT2 { get; set; }
+    [Parameter] public EventCallback<double> CannyT2Changed { get; set; }
+
+    [Parameter] public double Contrast { get; set; }
+    [Parameter] public EventCallback<double> ContrastChanged { get; set; }
+
+    [Parameter] public double Brightness { get; set; }
+    [Parameter] public EventCallback<double> BrightnessChanged { get; set; }
+
+    [Parameter] public bool CanUndo { get; set; }
+    [Parameter] public bool CanRedo { get; set; }
+
+    [Parameter] public EventCallback Undo { get; set; }
+    [Parameter] public EventCallback Redo { get; set; }
+    [Parameter] public EventCallback Reset { get; set; }
+
+    [Parameter] public IReadOnlyList<EditorHistoryListItem>? HistoryItems { get; set; }
+    [Parameter] public EventCallback<int> HistoryItemSelected { get; set; }
+
+    [Parameter] public string? Status { get; set; }
+}

@@ -50,6 +50,28 @@ Desktop.ini
 **/AppPackages/
 **/Artifacts/
 
+# .NET SDK (newer) default artifacts folder
+**/artifacts/
+
+# MAUI / Mobile / Desktop packaging outputs
+*.apk
+*.aab
+*.keystore
+*.jks
+*.ipa
+*.dmg
+*.pkg
+*.msix
+*.appx
+*.appxbundle
+*.msi
+*.exe
+*.dll
+*.pdb
+
+# Crash dumps
+*.dmp
+
 # Blazor / WASM generated assets (under build output)
 # (These are already covered by **/bin and **/obj)
 

@@ -10,30 +10,11 @@
 
 <MudGrid Class="pa-4" Spacing="2">
     <MudItem xs="12">
-        <MudPaper Class="pa-4" Elevation="1">
-            <MudStack Spacing="2">
-                <MudText Typo="Typo.h5">Editor</MudText>
-
-                <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
-                    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="PickImageAsync">
-                        Open Image
-                    </MudButton>
-
-                    @if (Document.HasImage)
-                    {
-                        <MudText Typo="Typo.body2">@Document.FileName (@(Document.Bytes!.Length / 1024) KB)</MudText>
-                        <MudButton Variant="Variant.Text" Color="Color.Error" OnClick="Clear">Clear</MudButton>
-                    }
-                    else
-                    {
-                        <MudText Typo="Typo.body2">No image loaded</MudText>
-                    }
-                </MudStack>
-
-                <MudDivider />
-                <MudText Typo="Typo.body2">Use the Properties panel (right) for filters and perspective.</MudText>
-            </MudStack>
-        </MudPaper>
+        <EditorHeader HasImage="@Document.HasImage"
+                      FileName="@Document.FileName"
+                      FileSizeBytes="@(Document.Bytes?.Length ?? 0)"
+                      OpenImage="PickImageAsync"
+                      Clear="@(EventCallback.Factory.Create(this, Clear))" />
     </MudItem>
 
     <MudItem xs="12">
@@ -146,76 +127,52 @@
         Layout?.SetRightPanel(RightPanel);
     }
 
-    private RenderFragment RightPanel => @<MudStack Spacing="2">
-        <MudSwitch T="bool" Value="@_perspectiveMode" ValueChanged="OnPerspectiveModeChanged" Color="Color.Primary" Label="Perspective Mode" />
+    private RenderFragment RightPanel => @<EditorRightPanel
+        HasImage="@Document.HasImage"
+        PerspectiveMode="@_perspectiveMode"
+        PerspectiveModeChanged="OnPerspectiveModeChanged"
+        ApplyPerspective="ApplyPerspectiveAsync"
+        RotateLeft="RotateLeftAsync"
+        RotateRight="RotateRightAsync"
+        ResizeHalf="ResizeHalfAsync"
+        BlurKernelSize="@_blurKernelSize"
+        BlurKernelSizeChanged="OnBlurChanged"
+        Grayscale="@_grayscale"
+        GrayscaleChanged="OnGrayscaleChanged"
+        Sepia="@_sepia"
+        SepiaChanged="OnSepiaChanged"
+        Canny="@_canny"
+        CannyChanged="OnCannyChanged"
+        CannyT1="@_cannyT1"
+        CannyT1Changed="OnCannyT1Changed"
+        CannyT2="@_cannyT2"
+        CannyT2Changed="OnCannyT2Changed"
+        Contrast="@_contrast"
+        ContrastChanged="OnContrastChanged"
+        Brightness="@_brightness"
+        BrightnessChanged="OnBrightnessChanged"
+        CanUndo="@CanUndo"
+        CanRedo="@CanRedo"
+        Undo="UndoAsync"
+        Redo="RedoAsync"
+        Reset="ResetToOriginalAsync"
+        HistoryItems="@GetHistoryItems()"
+        HistoryItemSelected="GoToHistoryAsync"
+        Status="@_status" />;
 
-        @if (_perspectiveMode)
+    private IReadOnlyList<EditorHistoryListItem> GetHistoryItems()
+    {
+        if (_history.Count == 0)
+            return Array.Empty<EditorHistoryListItem>();
+
+        var items = new List<EditorHistoryListItem>(_history.Count);
+        for (var i = 0; i < _history.Count; i++)
         {
-            <MudText Typo="Typo.caption">Drag the 4 points on the canvas, then apply.</MudText>
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(!Document.HasImage)" OnClick="ApplyPerspectiveAsync">Apply Perspective</MudButton>
+            items.Add(new EditorHistoryListItem(i, GetHistoryLabel(i), _history[i].ThumbnailDataUrl));
         }
 
-        <MudDivider />
-        <MudText Typo="Typo.subtitle2">Transform</MudText>
-        <MudStack Row="true" Spacing="1">
-            <MudButton Variant="Variant.Outlined" Disabled="@(!Document.HasImage)" OnClick="RotateLeftAsync">Rotate Left</MudButton>
-            <MudButton Variant="Variant.Outlined" Disabled="@(!Document.HasImage)" OnClick="RotateRightAsync">Rotate Right</MudButton>
-        </MudStack>
-        <MudButton Variant="Variant.Outlined" Disabled="@(!Document.HasImage)" OnClick="ResizeHalfAsync">Resize 50%</MudButton>
-
-        <MudDivider />
-        <MudText Typo="Typo.subtitle2">Filters</MudText>
-
-        <MudText Typo="Typo.caption">Blur Kernel</MudText>
-        <MudSlider T="int" Value="@_blurKernelSize" ValueChanged="OnBlurChanged" Min="0" Max="31" Step="1" Color="Color.Primary" />
-
-        <MudSwitch T="bool" Value="@_grayscale" ValueChanged="OnGrayscaleChanged" Color="Color.Primary" Label="Grayscale" Disabled="@_sepia" />
-        <MudSwitch T="bool" Value="@_sepia" ValueChanged="OnSepiaChanged" Color="Color.Primary" Label="Sepia" />
-
-        <MudSwitch T="bool" Value="@_canny" ValueChanged="OnCannyChanged" Color="Color.Primary" Label="Canny Edge" />
-
-        @if (_canny)
-        {
-            <MudText Typo="Typo.caption">Canny T1</MudText>
-            <MudSlider T="double" Value="@_cannyT1" ValueChanged="OnCannyT1Changed" Min="0" Max="255" Step="1" Color="Color.Primary" />
-            <MudText Typo="Typo.caption">Canny T2</MudText>
-            <MudSlider T="double" Value="@_cannyT2" ValueChanged="OnCannyT2Changed" Min="0" Max="255" Step="1" Color="Color.Primary" />
-        }
-
-        <MudText Typo="Typo.caption">Contrast</MudText>
-        <MudSlider T="double" Value="@_contrast" ValueChanged="OnContrastChanged" Min="0.5" Max="3.0" Step="0.05" Color="Color.Primary" />
-        <MudText Typo="Typo.caption">Brightness</MudText>
-        <MudSlider T="double" Value="@_brightness" ValueChanged="OnBrightnessChanged" Min="-100" Max="100" Step="1" Color="Color.Primary" />
-
-        <MudDivider />
-        <MudText Typo="Typo.subtitle2">History</MudText>
-        <MudStack Row="true" Spacing="1">
-            <MudButton Variant="Variant.Outlined" Disabled="@(!CanUndo)" OnClick="UndoAsync">Undo</MudButton>
-            <MudButton Variant="Variant.Outlined" Disabled="@(!CanRedo)" OnClick="RedoAsync">Redo</MudButton>
-            <MudButton Variant="Variant.Outlined" Disabled="@(!CanUndo)" OnClick="ResetToOriginalAsync">Reset</MudButton>
-        </MudStack>
-
-        <MudList T="string" Dense="true">
-            @for (var i = 0; i < _history.Count; i++)
-            {
-                var idx = i;
-                <MudListItem T="string" Value="@GetHistoryLabel(idx)" OnClick="@(async () => await GoToHistoryAsync(idx))" Disabled="@(!Document.HasImage)">
-                    <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
-                        @if (!string.IsNullOrWhiteSpace(_history[idx].ThumbnailDataUrl))
-                        {
-                            <img src="@_history[idx].ThumbnailDataUrl" width="40" height="40" style="object-fit:contain" />
-                        }
-                        <MudText Typo="Typo.caption">@GetHistoryLabel(idx)</MudText>
-                    </MudStack>
-                </MudListItem>
-            }
-        </MudList>
-
-        @if (!string.IsNullOrWhiteSpace(_status))
-        {
-            <MudText Typo="Typo.caption">@_status</MudText>
-        }
-    </MudStack>;
+        return items;
+    }
 
     private Task OnPerspectiveModeChanged(bool enabled)
     {

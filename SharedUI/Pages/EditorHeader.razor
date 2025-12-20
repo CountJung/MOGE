@@ -1,0 +1,35 @@
+@using MudBlazor
+
+<MudPaper Class="pa-4" Elevation="1">
+    <MudStack Spacing="2">
+        <MudText Typo="Typo.h5">Editor</MudText>
+
+        <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="@(async () => await OpenImage.InvokeAsync())">
+                Open Image
+            </MudButton>
+
+            @if (HasImage)
+            {
+                <MudText Typo="Typo.body2">@FileName (@(FileSizeBytes / 1024) KB)</MudText>
+                <MudButton Variant="Variant.Text" Color="Color.Error" OnClick="@(async () => await Clear.InvokeAsync())">Clear</MudButton>
+            }
+            else
+            {
+                <MudText Typo="Typo.body2">No image loaded</MudText>
+            }
+        </MudStack>
+
+        <MudDivider />
+        <MudText Typo="Typo.body2">Use the Properties panel (right) for filters and perspective.</MudText>
+    </MudStack>
+</MudPaper>
+
+@code {
+    [Parameter] public bool HasImage { get; set; }
+    [Parameter] public string? FileName { get; set; }
+    [Parameter] public long FileSizeBytes { get; set; }
+
+    [Parameter] public EventCallback OpenImage { get; set; }
+    [Parameter] public EventCallback Clear { get; set; }
+}
