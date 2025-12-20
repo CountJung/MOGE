@@ -23,6 +23,7 @@ public static class MauiProgram
 		builder.Services.AddMudServices();
 		builder.Services.AddScoped<ImageDocumentState>();
 		builder.Services.AddScoped<IImageFilePicker, MauiImageFilePicker>();
+		builder.Services.AddScoped<IImageExportService, WindowsImageExportService>();
 		builder.Services.AddScoped<ImageProcessorService>();
 
 		builder.Services.AddSingleton(new MogeLogOptions(PlatformSubfolder: "app"));

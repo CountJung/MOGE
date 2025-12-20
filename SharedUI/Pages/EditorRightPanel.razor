@@ -1,28 +1,78 @@
 @using MudBlazor
 
 <MudStack Spacing="2">
-    <MudSwitch T="bool" Value="@PerspectiveMode" ValueChanged="PerspectiveModeChanged" Color="Color.Primary" Label="Perspective Mode" />
+    <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+        <MudTooltip Text="Perspective Mode">
+            <MudIconButton Icon="@Icons.Material.Filled.Tune"
+                           Color="@(PerspectiveMode ? Color.Primary : Color.Inherit)"
+                           Style="@ToggleIconStyle(PerspectiveMode)"
+                           OnClick="TogglePerspectiveMode"
+                           aria-label="Toggle Perspective Mode" />
+        </MudTooltip>
 
-    <MudSwitch T="bool" Value="@CropMode" ValueChanged="CropModeChanged" Color="Color.Primary" Label="Crop Mode" Disabled="@PerspectiveMode" />
+        <MudTooltip Text="Crop Mode">
+            <MudIconButton Icon="@Icons.Material.Filled.CropSquare"
+                           Color="@(CropMode ? Color.Primary : Color.Inherit)"
+                           Disabled="@PerspectiveMode"
+                           Style="@ToggleIconStyle(CropMode)"
+                           OnClick="ToggleCropMode"
+                           aria-label="Toggle Crop Mode" />
+        </MudTooltip>
+    </MudStack>
 
     @if (PerspectiveMode)
     {
         <MudText Typo="Typo.caption">Drag the 4 points on the canvas, then apply.</MudText>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(!HasImage)" OnClick="@(async () => await ApplyPerspective.InvokeAsync())">Apply Perspective</MudButton>
+        <MudTooltip Text="Apply Perspective">
+            <MudIconButton Icon="@Icons.Material.Filled.Check"
+                           Color="@(HasImage ? Color.Primary : Color.Inherit)"
+                           Disabled="@(!HasImage)"
+                           Style="@ActionIconStyle(HasImage)"
+                           OnClick="@(async () => await ApplyPerspective.InvokeAsync())"
+                           aria-label="Apply Perspective" />
+        </MudTooltip>
     }
 
     @if (CropMode)
     {
         <MudText Typo="Typo.caption">Drag the 4 corners, then apply crop.</MudText>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(!HasImage)" OnClick="@(async () => await ApplyCrop.InvokeAsync())">Apply Crop</MudButton>
+        <MudTooltip Text="Apply Crop">
+            <MudIconButton Icon="@Icons.Material.Filled.Check"
+                           Color="@(HasImage ? Color.Primary : Color.Inherit)"
+                           Disabled="@(!HasImage)"
+                           Style="@ActionIconStyle(HasImage)"
+                           OnClick="@(async () => await ApplyCrop.InvokeAsync())"
+                           aria-label="Apply Crop" />
+        </MudTooltip>
     }
 
     <MudText Typo="Typo.subtitle2">Transform</MudText>
     <MudStack Row="true" Spacing="1">
-        <MudButton Variant="Variant.Outlined" Disabled="@(!HasImage)" OnClick="@(async () => await RotateLeft.InvokeAsync())">Rotate Left</MudButton>
-        <MudButton Variant="Variant.Outlined" Disabled="@(!HasImage)" OnClick="@(async () => await RotateRight.InvokeAsync())">Rotate Right</MudButton>
+        <MudTooltip Text="Rotate Left">
+            <MudIconButton Icon="@Icons.Material.Filled.RotateLeft"
+                           Disabled="@(!HasImage)"
+                           Color="@(HasImage ? Color.Primary : Color.Inherit)"
+                           Style="@ActionIconStyle(HasImage)"
+                           OnClick="@(async () => await RotateLeft.InvokeAsync())"
+                           aria-label="Rotate Left" />
+        </MudTooltip>
+        <MudTooltip Text="Rotate Right">
+            <MudIconButton Icon="@Icons.Material.Filled.RotateRight"
+                           Disabled="@(!HasImage)"
+                           Color="@(HasImage ? Color.Primary : Color.Inherit)"
+                           Style="@ActionIconStyle(HasImage)"
+                           OnClick="@(async () => await RotateRight.InvokeAsync())"
+                           aria-label="Rotate Right" />
+        </MudTooltip>
     </MudStack>
-    <MudButton Variant="Variant.Outlined" Disabled="@(!HasImage)" OnClick="@(async () => await ResizeHalf.InvokeAsync())">Resize 50%</MudButton>
+    <MudTooltip Text="Resize 50%">
+        <MudIconButton Icon="@Icons.Material.Filled.PhotoSizeSelectSmall"
+                       Disabled="@(!HasImage)"
+                       Color="@(HasImage ? Color.Primary : Color.Inherit)"
+                       Style="@ActionIconStyle(HasImage)"
+                       OnClick="@(async () => await ResizeHalf.InvokeAsync())"
+                       aria-label="Resize 50%" />
+    </MudTooltip>
 
     <MudDivider />
     <MudText Typo="Typo.subtitle2">Filters</MudText>
@@ -30,10 +80,30 @@
     <MudText Typo="Typo.caption">Blur Kernel</MudText>
     <MudSlider T="int" Value="@BlurKernelSize" ValueChanged="BlurKernelSizeChanged" Min="0" Max="31" Step="1" Color="Color.Primary" />
 
-    <MudSwitch T="bool" Value="@Grayscale" ValueChanged="GrayscaleChanged" Color="Color.Primary" Label="Grayscale" Disabled="@Sepia" />
-    <MudSwitch T="bool" Value="@Sepia" ValueChanged="SepiaChanged" Color="Color.Primary" Label="Sepia" />
-
-    <MudSwitch T="bool" Value="@Canny" ValueChanged="CannyChanged" Color="Color.Primary" Label="Canny Edge" />
+    <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+        <MudTooltip Text="Grayscale">
+            <MudIconButton Icon="@Icons.Material.Filled.MonochromePhotos"
+                           Color="@(Grayscale ? Color.Primary : Color.Inherit)"
+                           Disabled="@Sepia"
+                           Style="@ToggleIconStyle(Grayscale && !Sepia)"
+                           OnClick="ToggleGrayscale"
+                           aria-label="Toggle Grayscale" />
+        </MudTooltip>
+        <MudTooltip Text="Sepia">
+            <MudIconButton Icon="@Icons.Material.Filled.FilterVintage"
+                           Color="@(Sepia ? Color.Primary : Color.Inherit)"
+                           Style="@ToggleIconStyle(Sepia)"
+                           OnClick="ToggleSepia"
+                           aria-label="Toggle Sepia" />
+        </MudTooltip>
+        <MudTooltip Text="Canny Edge">
+            <MudIconButton Icon="@Icons.Material.Filled.Timeline"
+                           Color="@(Canny ? Color.Primary : Color.Inherit)"
+                           Style="@ToggleIconStyle(Canny)"
+                           OnClick="ToggleCanny"
+                           aria-label="Toggle Canny Edge" />
+        </MudTooltip>
+    </MudStack>
 
     @if (Canny)
     {
@@ -51,9 +121,24 @@
     <MudDivider />
     <MudText Typo="Typo.subtitle2">History</MudText>
     <MudStack Row="true" Spacing="1">
-        <MudButton Variant="Variant.Outlined" Disabled="@(!CanUndo)" OnClick="@(async () => await Undo.InvokeAsync())">Undo</MudButton>
-        <MudButton Variant="Variant.Outlined" Disabled="@(!CanRedo)" OnClick="@(async () => await Redo.InvokeAsync())">Redo</MudButton>
-        <MudButton Variant="Variant.Outlined" Disabled="@(!CanUndo)" OnClick="@(async () => await Reset.InvokeAsync())">Reset</MudButton>
+        <MudTooltip Text="Undo">
+            <MudIconButton Icon="@Icons.Material.Filled.Undo"
+                           Disabled="@(!CanUndo)"
+                           OnClick="@(async () => await Undo.InvokeAsync())"
+                           aria-label="Undo" />
+        </MudTooltip>
+        <MudTooltip Text="Redo">
+            <MudIconButton Icon="@Icons.Material.Filled.Redo"
+                           Disabled="@(!CanRedo)"
+                           OnClick="@(async () => await Redo.InvokeAsync())"
+                           aria-label="Redo" />
+        </MudTooltip>
+        <MudTooltip Text="Reset">
+            <MudIconButton Icon="@Icons.Material.Filled.Restore"
+                           Disabled="@(!CanUndo)"
+                           OnClick="@(async () => await Reset.InvokeAsync())"
+                           aria-label="Reset" />
+        </MudTooltip>
     </MudStack>
 
     <MudList T="string" Dense="true">
@@ -62,13 +147,23 @@
             @foreach (var item in HistoryItems)
             {
                 var idx = item.Index;
-                <MudListItem T="string" Value="@item.DisplayLabel" OnClick="@(async () => await HistoryItemSelected.InvokeAsync(idx))" Disabled="@(!HasImage)">
+                var isCurrent = idx == CurrentHistoryIndex;
+                <MudListItem T="string" Value="@item.DisplayLabel" OnClick="@(async () => await OnHistoryItemClicked(idx))" Disabled="@(!HasImage)" Style="@HistoryItemStyle(isCurrent)">
                     <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                        @if (isCurrent)
+                        {
+                            <MudIcon Icon="@Icons.Material.Filled.PlayArrow" Color="Color.Primary" Size="Size.Small" />
+                        }
+                        else
+                        {
+                            <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Inherit" Size="Size.Small" Style="opacity:0.25;" />
+                        }
+
                         @if (!string.IsNullOrWhiteSpace(item.ThumbnailDataUrl))
                         {
                             <img src="@item.ThumbnailDataUrl" width="40" height="40" style="object-fit:contain" />
                         }
-                        <MudText Typo="Typo.caption">@item.DisplayLabel</MudText>
+                        <MudText Typo="Typo.caption" Style="@(isCurrent ? "font-weight:600;" : null)">@item.DisplayLabel</MudText>
                     </MudStack>
                 </MudListItem>
             }
@@ -121,11 +216,79 @@
     [Parameter] public bool CanUndo { get; set; }
     [Parameter] public bool CanRedo { get; set; }
 
+    [Parameter] public int CurrentHistoryIndex { get; set; } = -1;
+
     [Parameter] public EventCallback Undo { get; set; }
     [Parameter] public EventCallback Redo { get; set; }
     [Parameter] public EventCallback Reset { get; set; }
 
     [Parameter] public IReadOnlyList<EditorHistoryListItem>? HistoryItems { get; set; }
     [Parameter] public EventCallback<int> HistoryItemSelected { get; set; }
+
+    private static string ToggleIconStyle(bool isActive)
+    {
+        var borderColor = isActive ? "var(--mud-palette-primary)" : "var(--mud-palette-lines-default)";
+        return $"border:1px solid {borderColor}; border-radius: var(--mud-default-borderradius);";
+    }
+
+    private static string ActionIconStyle(bool isEnabled)
+    {
+        var borderColor = isEnabled ? "var(--mud-palette-primary)" : "var(--mud-palette-lines-default)";
+        return $"border:1px solid {borderColor}; border-radius: var(--mud-default-borderradius);";
+    }
+
+    private static string HistoryItemStyle(bool isCurrent)
+    {
+        if (!isCurrent)
+            return "border-left:3px solid transparent;";
+
+        return "border-left:3px solid var(--mud-palette-primary);";
+    }
+
+    private Task OnHistoryItemClicked(int index)
+    {
+        if (!HasImage)
+            return Task.CompletedTask;
+
+        if (index == CurrentHistoryIndex)
+            return Task.CompletedTask;
+
+        return HistoryItemSelected.InvokeAsync(index);
+    }
+
+    private Task TogglePerspectiveMode()
+    {
+        return PerspectiveModeChanged.InvokeAsync(!PerspectiveMode);
+    }
+
+    private Task ToggleCropMode()
+    {
+        if (PerspectiveMode)
+        {
+            return Task.CompletedTask;
+        }
+
+        return CropModeChanged.InvokeAsync(!CropMode);
+    }
+
+    private Task ToggleGrayscale()
+    {
+        if (Sepia)
+        {
+            return Task.CompletedTask;
+        }
+
+        return GrayscaleChanged.InvokeAsync(!Grayscale);
+    }
+
+    private Task ToggleSepia()
+    {
+        return SepiaChanged.InvokeAsync(!Sepia);
+    }
+
+    private Task ToggleCanny()
+    {
+        return CannyChanged.InvokeAsync(!Canny);
+    }
 
 }

@@ -5,14 +5,27 @@
         <MudText Typo="Typo.h5">Editor</MudText>
 
         <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="@(async () => await OpenImage.InvokeAsync())">
-                Open Image
-            </MudButton>
+            <MudTooltip Text="Open image">
+                <MudIconButton Icon="@Icons.Material.Filled.FolderOpen" Color="Color.Primary"
+                               OnClick="@(async () => await OpenImage.InvokeAsync())"
+                               aria-label="Open image" />
+            </MudTooltip>
 
             @if (HasImage)
             {
                 <MudText Typo="Typo.body2">@FileName (@(FileSizeBytes / 1024) KB)</MudText>
-                <MudButton Variant="Variant.Text" Color="Color.Error" OnClick="@(async () => await Clear.InvokeAsync())">Clear</MudButton>
+
+                <MudTooltip Text="Save as PNG">
+                    <MudIconButton Icon="@Icons.Material.Filled.Download" Color="Color.Inherit"
+                                   OnClick="@(async () => await SavePng.InvokeAsync())"
+                                   aria-label="Save as PNG" />
+                </MudTooltip>
+
+                <MudTooltip Text="Clear image">
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error"
+                                   OnClick="@(async () => await Clear.InvokeAsync())"
+                                   aria-label="Clear image" />
+                </MudTooltip>
             }
             else
             {
@@ -31,5 +44,6 @@
     [Parameter] public long FileSizeBytes { get; set; }
 
     [Parameter] public EventCallback OpenImage { get; set; }
+    [Parameter] public EventCallback SavePng { get; set; }
     [Parameter] public EventCallback Clear { get; set; }
 }

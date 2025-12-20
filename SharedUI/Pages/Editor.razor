@@ -3,19 +3,51 @@
 @implements IDisposable
 
 @using OpenCvSharp
+@using System.IO
 @using SharedUI.Components
 
 @inject IImageFilePicker ImageFilePicker
 @inject ImageDocumentState Document
 @inject ImageProcessorService ImageProcessor
+@inject IImageExportService ImageExport
 
 <MudGrid Class="pa-4" Spacing="2">
     <MudItem xs="12">
         <EditorHeader HasImage="@Document.HasImage"
                       FileName="@Document.FileName"
                       FileSizeBytes="@(Document.Bytes?.Length ?? 0)"
-                      OpenImage="PickImageAsync"
+                      OpenImage="PickImagesAsync"
+                      SavePng="SavePngAsync"
                       Clear="@(EventCallback.Factory.Create(this, Clear))" />
+    </MudItem>
+
+    <MudItem xs="12">
+        @if (_loadedImages.Count > 0)
+        {
+            <MudPaper Class="pa-2" Outlined="true" Style="overflow-x:auto;">
+                <MudStack Row="true" Spacing="2" Style="flex-wrap:nowrap;">
+                    @for (var i = 0; i < _loadedImages.Count; i++)
+                    {
+                        var idx = i;
+                        var item = _loadedImages[i];
+                        var isSelected = idx == _selectedLoadedIndex;
+
+                        <MudPaper Class="pa-2" Elevation="0" Style="@GetLoadedImageCardStyle(isSelected)" @onclick="(() => SelectLoadedImage(idx))">
+                            @if (!string.IsNullOrWhiteSpace(item.ThumbnailDataUrl))
+                            {
+                                <MudImage Src="@item.ThumbnailDataUrl" Width="120" Height="120" Style="object-fit:contain;" />
+                            }
+                            else
+                            {
+                                <MudText Typo="Typo.caption">(no preview)</MudText>
+                            }
+
+                            <MudText Typo="Typo.caption" Style="max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">@item.Pick.FileName</MudText>
+                        </MudPaper>
+                    }
+                </MudStack>
+            </MudPaper>
+        }
     </MudItem>
 
     <MudItem xs="12" md="3" lg="2">
@@ -25,17 +57,26 @@
                        InteractionMode="@_interactionMode"
                        InteractionModeChanged="OnInteractionModeChanged"
                        BrushRadius="@_brushRadius"
-                       BrushRadiusChanged="OnBrushRadiusChanged" />
+                       BrushRadiusChanged="OnBrushRadiusChanged"
+                       SelectionMode="@_selectionMode"
+                       SelectionModeChanged="OnSelectionModeChanged"
+                       SelectionBlurKernelSize="@_selectionBlurKernelSize"
+                       SelectionBlurKernelSizeChanged="OnSelectionBlurKernelSizeChanged"
+                       SharpenAmount="@_selectionSharpenAmount"
+                       SharpenAmountChanged="OnSelectionSharpenAmountChanged"
+                       ApplySelectionBlur="ApplySelectionBlurAsync"
+                       ApplySelectionSharpen="ApplySelectionSharpenAsync" />
     </MudItem>
 
     <MudItem xs="12" md="9" lg="10">
         <ImageCanvas ImageBytes="@_viewBytes" ContentType="@Document.ContentType"
-                    EnableHandles="@(_perspectiveMode || _cropMode)"
-                    HandlesAsRectangle="@_cropMode"
+                    EnableHandles="@(_perspectiveMode || _cropMode || _selectionMode)"
+                    HandlesAsRectangle="@(_cropMode || _selectionMode)"
                     Handles="@_handles"
                     HandlesChanged="OnHandlesChanged"
-                    InteractionMode="@((_perspectiveMode || _cropMode) ? CanvasInteractionMode.PanZoom : _interactionMode)"
+                    InteractionMode="@((_perspectiveMode || _cropMode || _selectionMode) ? CanvasInteractionMode.PanZoom : _interactionMode)"
                     BrushRadius="@_brushRadius"
+                    CanvasReady="OnCanvasReady"
                     StrokeCommitted="OnStrokeCommittedAsync" />
     </MudItem>
 </MudGrid>
@@ -43,7 +84,11 @@
 @code {
     [CascadingParameter] public SharedUI.Layout.MainLayout? Layout { get; set; }
 
+    private bool _layoutShortcutsSubscribed;
+
     private byte[]? _viewBytes;
+    private ElementReference _canvas;
+    private bool _hasCanvas;
     private const int MaxHistoryEntries = 50;
     private sealed record HistoryEntry(byte[] Bytes, string Label, DateTime Timestamp, string? ThumbnailDataUrl);
     private readonly List<HistoryEntry> _history = new();
@@ -51,12 +96,16 @@
 
     private bool _perspectiveMode;
     private bool _cropMode;
+    private bool _selectionMode;
     private List<CanvasPoint> _handles = new();
     private int _imageWidth;
     private int _imageHeight;
 
     private CanvasInteractionMode _interactionMode = CanvasInteractionMode.PanZoom;
     private int _brushRadius = 8;
+
+    private int _selectionBlurKernelSize;
+    private double _selectionSharpenAmount = 1.0;
 
     private int _blurKernelSize;
     private bool _grayscale;
@@ -69,6 +118,10 @@
 
     private CancellationTokenSource? _debounceCts;
     private string? _status;
+
+    private sealed record LoadedImage(ImagePickResult Pick, string? ThumbnailDataUrl);
+    private readonly List<LoadedImage> _loadedImages = new();
+    private int _selectedLoadedIndex = -1;
 
     private byte[]? CurrentBytes
         => _historyIndex >= 0 && _historyIndex < _history.Count
@@ -88,6 +141,13 @@
     {
         if (firstRender)
             RefreshRightPanel();
+
+        if (Layout is not null && !_layoutShortcutsSubscribed)
+        {
+            Layout.UndoRequested += OnLayoutUndoRequested;
+            Layout.RedoRequested += OnLayoutRedoRequested;
+            _layoutShortcutsSubscribed = true;
+        }
     }
 
     private void OnDocChanged()
@@ -105,6 +165,7 @@
 
         _perspectiveMode = false;
         _cropMode = false;
+        _selectionMode = false;
 
         _history.Clear();
         _historyIndex = -1;
@@ -131,16 +192,73 @@
         _status = null;
     }
 
-    private async Task PickImageAsync()
+    private async Task PickImagesAsync()
     {
-        var pick = await ImageFilePicker.PickImageAsync();
-        if (pick is null)
+        var picks = await ImageFilePicker.PickImagesAsync();
+        if (picks.Count == 0)
             return;
 
-        Document.Set(pick);
+        var firstNewIndex = _loadedImages.Count;
+        foreach (var pick in picks)
+        {
+            string? thumb = null;
+            try { thumb = ImageProcessor.CreateThumbnailDataUrl(pick.Bytes); } catch { }
+            _loadedImages.Add(new LoadedImage(pick, thumb));
+        }
+
+        SelectLoadedImage(firstNewIndex);
     }
 
-    private void Clear() => Document.Clear();
+    private void Clear()
+    {
+        _selectedLoadedIndex = -1;
+        Document.Clear();
+    }
+
+    private void SelectLoadedImage(int index)
+    {
+        if (index < 0 || index >= _loadedImages.Count)
+            return;
+
+        if (_selectedLoadedIndex == index && Document.HasImage)
+            return;
+
+        _selectedLoadedIndex = index;
+        Document.Set(_loadedImages[index].Pick);
+    }
+
+    private static string GetLoadedImageCardStyle(bool isSelected)
+    {
+        var border = isSelected
+            ? "2px solid var(--mud-palette-primary)"
+            : "1px solid var(--mud-palette-lines-default)";
+
+        return $"border:{border}; border-radius: var(--mud-default-borderradius); cursor:pointer; user-select:none;";
+    }
+
+    private Task OnCanvasReady(ElementReference canvas)
+    {
+        _canvas = canvas;
+        _hasCanvas = true;
+        return Task.CompletedTask;
+    }
+
+    private async Task SavePngAsync()
+    {
+        if (!Document.HasImage)
+            return;
+
+        if (!_hasCanvas)
+            return;
+
+        var baseName = FileNameUtil.GetSafeBaseName(Document.FileName, "image");
+
+        var filename = $"{baseName}-edited.png";
+
+        await ImageExport.SavePngAsync(_canvas, filename);
+        _status = $"Saved: {filename}";
+        RefreshRightPanel();
+    }
 
     private void RefreshRightPanel()
     {
@@ -177,6 +295,7 @@
         BrightnessChanged="OnBrightnessChanged"
         CanUndo="@CanUndo"
         CanRedo="@CanRedo"
+        CurrentHistoryIndex="@_historyIndex"
         Undo="UndoAsync"
         Redo="RedoAsync"
         Reset="ResetToOriginalAsync"
@@ -207,6 +326,9 @@
 
         if (enabled)
             _cropMode = false;
+
+        if (enabled)
+            _selectionMode = false;
 
         if (!enabled)
         {
@@ -248,6 +370,7 @@
         if (enabled)
         {
             _perspectiveMode = false;
+            _selectionMode = false;
             _interactionMode = CanvasInteractionMode.PanZoom;
 
             if (!Document.HasImage)
@@ -292,6 +415,57 @@
         return Task.CompletedTask;
     }
 
+    private Task OnSelectionModeChanged(bool enabled)
+    {
+        _selectionMode = enabled;
+
+        if (enabled)
+        {
+            _perspectiveMode = false;
+            _cropMode = false;
+            _interactionMode = CanvasInteractionMode.PanZoom;
+
+            if (!Document.HasImage)
+            {
+                _selectionMode = false;
+                RefreshRightPanel();
+                return Task.CompletedTask;
+            }
+
+            var baseBytes = CurrentBytes;
+            _viewBytes = baseBytes;
+
+            (_imageWidth, _imageHeight) = ImageProcessor.GetSize(baseBytes);
+
+            var mx = Math.Max(1, (int)Math.Round(_imageWidth * 0.1));
+            var my = Math.Max(1, (int)Math.Round(_imageHeight * 0.1));
+
+            var x0 = mx;
+            var y0 = my;
+            var x1 = Math.Max(x0 + 1, _imageWidth - mx);
+            var y1 = Math.Max(y0 + 1, _imageHeight - my);
+
+            _handles = new List<CanvasPoint>
+            {
+                new(x0, y0),
+                new(x1, y0),
+                new(x1, y1),
+                new(x0, y1)
+            };
+
+            _status = "Selection: adjust corners";
+            RefreshRightPanel();
+            StateHasChanged();
+            return Task.CompletedTask;
+        }
+
+        _handles = new();
+        _status = null;
+        RefreshRightPanel();
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
     private Task OnInteractionModeChanged(CanvasInteractionMode mode)
     {
         _interactionMode = mode;
@@ -301,6 +475,9 @@
 
         if (mode != CanvasInteractionMode.PanZoom)
             _cropMode = false;
+
+        if (mode != CanvasInteractionMode.PanZoom)
+            _selectionMode = false;
 
         _status = mode == CanvasInteractionMode.PanZoom ? null : $"Tool: {mode}";
         RefreshRightPanel();
@@ -316,7 +493,7 @@
 
     private Task OnHandlesChanged(IReadOnlyList<CanvasPoint> updated)
     {
-        if (_cropMode)
+        if (_cropMode || _selectionMode)
         {
             var xs = updated.Select(p => p.X).ToArray();
             var ys = updated.Select(p => p.Y).ToArray();
@@ -342,6 +519,129 @@
 
         _handles = updated.ToList();
         return Task.CompletedTask;
+    }
+
+    private Task OnSelectionBlurKernelSizeChanged(int v)
+    {
+        _selectionBlurKernelSize = Math.Clamp(v, 0, 31);
+        return Task.CompletedTask;
+    }
+
+    private Task OnSelectionSharpenAmountChanged(double v)
+    {
+        _selectionSharpenAmount = Math.Clamp(v, 0, 3);
+        return Task.CompletedTask;
+    }
+
+    private async Task ApplySelectionBlurAsync()
+    {
+        if (!Document.HasImage || !_selectionMode)
+            return;
+
+        if (_handles.Count != 4)
+        {
+            _status = "Selection: expected 4 points";
+            RefreshRightPanel();
+            StateHasChanged();
+            return;
+        }
+
+        var (x0, y0, w, h) = GetHandlesRect();
+        var kernel = _selectionBlurKernelSize;
+        if (kernel <= 1)
+        {
+            _status = "Blur: kernel is 0";
+            RefreshRightPanel();
+            return;
+        }
+
+        _status = "Blurring selection...";
+        RefreshRightPanel();
+        StateHasChanged();
+
+        var baseBytes = CurrentBytes!;
+        byte[] next;
+        try
+        {
+            next = await Task.Run(() => ImageProcessor.BlurRegion(baseBytes, x0, y0, w, h, kernel));
+        }
+        catch (Exception ex)
+        {
+            _status = ex.Message;
+            RefreshRightPanel();
+            StateHasChanged();
+            return;
+        }
+
+        CommitHistory(next, "Blur", preserveHandles: true);
+        _status = "Blur applied";
+        RefreshRightPanel();
+        StateHasChanged();
+        await ApplyPipelineDebouncedAsync();
+    }
+
+    private async Task ApplySelectionSharpenAsync()
+    {
+        if (!Document.HasImage || !_selectionMode)
+            return;
+
+        if (_handles.Count != 4)
+        {
+            _status = "Selection: expected 4 points";
+            RefreshRightPanel();
+            StateHasChanged();
+            return;
+        }
+
+        var (x0, y0, w, h) = GetHandlesRect();
+        var amount = _selectionSharpenAmount;
+        if (amount <= 0.0001)
+        {
+            _status = "Sharpen: amount is 0";
+            RefreshRightPanel();
+            return;
+        }
+
+        _status = "Sharpening selection...";
+        RefreshRightPanel();
+        StateHasChanged();
+
+        var baseBytes = CurrentBytes!;
+        byte[] next;
+        try
+        {
+            next = await Task.Run(() => ImageProcessor.SharpenRegion(baseBytes, x0, y0, w, h, amount));
+        }
+        catch (Exception ex)
+        {
+            _status = ex.Message;
+            RefreshRightPanel();
+            StateHasChanged();
+            return;
+        }
+
+        CommitHistory(next, "Sharpen", preserveHandles: true);
+        _status = "Sharpen applied";
+        RefreshRightPanel();
+        StateHasChanged();
+        await ApplyPipelineDebouncedAsync();
+    }
+
+    private (int x, int y, int w, int h) GetHandlesRect()
+    {
+        var minX = _handles.Min(p => p.X);
+        var maxX = _handles.Max(p => p.X);
+        var minY = _handles.Min(p => p.Y);
+        var maxY = _handles.Max(p => p.Y);
+
+        var x0 = (int)Math.Floor(Math.Clamp(minX, 0, _imageWidth - 1));
+        var y0 = (int)Math.Floor(Math.Clamp(minY, 0, _imageHeight - 1));
+        var x1 = (int)Math.Ceiling(Math.Clamp(maxX, x0 + 1, _imageWidth));
+        var y1 = (int)Math.Ceiling(Math.Clamp(maxY, y0 + 1, _imageHeight));
+
+        var w = Math.Max(1, x1 - x0);
+        var h = Math.Max(1, y1 - y0);
+        return (x0, y0, w, h);
     }
 
     private async Task ApplyCropAsync()
@@ -586,7 +886,7 @@
                     if (token.IsCancellationRequested)
                         return;
 
-                    CommitHistory(processed, "Filters", replaceCurrentIfSameLabel: true);
+                    CommitHistory(processed, "Filters", replaceCurrentIfSameLabel: true, preserveHandles: _cropMode || _selectionMode);
                     _status = "Updated";
                     RefreshRightPanel();
                     StateHasChanged();
@@ -609,7 +909,7 @@
         return Task.CompletedTask;
     }
 
-    private void CommitHistory(byte[] bytes, string label, bool replaceCurrentIfSameLabel = false)
+    private void CommitHistory(byte[] bytes, string label, bool replaceCurrentIfSameLabel = false, bool preserveHandles = false)
     {
         if (!Document.HasImage)
             return;
@@ -639,7 +939,9 @@
 
         _viewBytes = bytes;
         (_imageWidth, _imageHeight) = ImageProcessor.GetSize(bytes);
-        _handles = new();
+
+        if (!preserveHandles)
+            _handles = new();
     }
 
     private string GetHistoryLabel(int index)
@@ -647,8 +949,23 @@
         if (index < 0 || index >= _history.Count)
             return string.Empty;
 
-        var prefix = index == _historyIndex ? "▶ " : string.Empty;
-        return prefix + _history[index].Label;
+        return _history[index].Label;
+    }
+
+    private Task OnLayoutUndoRequested()
+    {
+        if (!CanUndo)
+            return Task.CompletedTask;
+
+        return UndoAsync();
+    }
+
+    private Task OnLayoutRedoRequested()
+    {
+        if (!CanRedo)
+            return Task.CompletedTask;
+
+        return RedoAsync();
     }
 
     private Task UndoAsync() => GoToHistoryAsync(_historyIndex - 1);
@@ -683,6 +1000,13 @@
     public void Dispose()
     {
         Document.Changed -= OnDocChanged;
+
+        if (Layout is not null && _layoutShortcutsSubscribed)
+        {
+            Layout.UndoRequested -= OnLayoutUndoRequested;
+            Layout.RedoRequested -= OnLayoutRedoRequested;
+            _layoutShortcutsSubscribed = false;
+        }
 
         _debounceCts?.Cancel();
         _debounceCts?.Dispose();

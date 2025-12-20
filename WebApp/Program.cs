@@ -20,6 +20,7 @@ builder.Services.AddScoped<BrowserRawImageProvider>();
 builder.Services.AddScoped<IRawImageProvider>(sp => sp.GetRequiredService<BrowserRawImageProvider>());
 builder.Services.AddScoped<IRawImageCache>(sp => sp.GetRequiredService<BrowserRawImageProvider>());
 builder.Services.AddScoped<IImageFilePicker, BrowserImageFilePicker>();
+builder.Services.AddScoped<IImageExportService, BrowserImageExportService>();
 builder.Services.AddScoped<ImageProcessorService>();
 
 builder.Services.AddSingleton(new MogeLogOptions(PlatformSubfolder: "web"));

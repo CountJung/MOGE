@@ -370,6 +370,104 @@ internal static class RgbaImageOps
         return new RawRgbaImage(width, height, dst);
     }
 
+    public static RawRgbaImage Blit(in RawRgbaImage dst, in RawRgbaImage src, int x, int y)
+    {
+        if (dst.Width <= 0 || dst.Height <= 0)
+            return dst;
+
+        if (dst.RgbaBytes is null || dst.RgbaBytes.Length < dst.Width * dst.Height * 4)
+            return dst;
+
+        if (src.Width <= 0 || src.Height <= 0)
+            return dst;
+
+        if (src.RgbaBytes is null || src.RgbaBytes.Length < src.Width * src.Height * 4)
+            return dst;
+
+        x = Math.Clamp(x, 0, dst.Width - 1);
+        y = Math.Clamp(y, 0, dst.Height - 1);
+
+        var width = Math.Clamp(src.Width, 1, dst.Width - x);
+        var height = Math.Clamp(src.Height, 1, dst.Height - y);
+
+        if (width == dst.Width && height == dst.Height && x == 0 && y == 0)
+            return src;
+
+        var outBytes = dst.RgbaBytes.ToArray();
+        var dstStride = dst.Width * 4;
+        var srcStride = src.Width * 4;
+        var copyStride = width * 4;
+
+        for (var row = 0; row < height; row++)
+        {
+            var dstOffset = ((y + row) * dst.Width + x) * 4;
+            var srcOffset = row * srcStride;
+            Buffer.BlockCopy(src.RgbaBytes, srcOffset, outBytes, dstOffset, copyStride);
+        }
+
+        return new RawRgbaImage(dst.Width, dst.Height, outBytes);
+    }
+
+    public static RawRgbaImage Sharpen(in RawRgbaImage src, double amount)
+    {
+        if (src.Width <= 0 || src.Height <= 0)
+            return src;
+
+        if (src.RgbaBytes is null || src.RgbaBytes.Length < src.Width * src.Height * 4)
+            return src;
+
+        amount = Math.Clamp(amount, 0, 3);
+        if (amount <= 0.0001)
+            return src;
+
+        var w = src.Width;
+        var h = src.Height;
+        var s = src.RgbaBytes;
+        var dst = new byte[s.Length];
+
+        // Kernel:
+        // [ 0, -a, 0
+        //  -a, 1+4a, -a
+        //   0, -a, 0 ]
+        var a = amount;
+
+        for (var y = 0; y < h; y++)
+        {
+            var y0 = Math.Max(0, y - 1);
+            var y1 = y;
+            var y2 = Math.Min(h - 1, y + 1);
+
+            for (var x = 0; x < w; x++)
+            {
+                var x0 = Math.Max(0, x - 1);
+                var x1 = x;
+                var x2 = Math.Min(w - 1, x + 1);
+
+                var c = (y1 * w + x1) * 4;
+                var up = (y0 * w + x1) * 4;
+                var dn = (y2 * w + x1) * 4;
+                var lf = (y1 * w + x0) * 4;
+                var rt = (y1 * w + x2) * 4;
+
+                for (var ch = 0; ch < 3; ch++)
+                {
+                    var v = (1 + 4 * a) * s[c + ch]
+                            - a * s[up + ch]
+                            - a * s[dn + ch]
+                            - a * s[lf + ch]
+                            - a * s[rt + ch];
+
+                    dst[c + ch] = ClampToByte(v);
+                }
+
+                // Preserve alpha.
+                dst[c + 3] = s[c + 3];
+            }
+        }
+
+        return new RawRgbaImage(w, h, dst);
+    }
+
     public static RawRgbaImage WarpPerspective(in RawRgbaImage src, Point2f[] srcQuad, Point2f[] dstQuad, int outWidth, int outHeight)
     {
         if (srcQuad.Length != 4 || dstQuad.Length != 4)

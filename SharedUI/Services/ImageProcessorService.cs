@@ -391,6 +391,131 @@ public sealed class ImageProcessorService
         return EncodeForDisplay(dst);
     }
 
+    public byte[] BlurRegion(byte[] imageBytes, int x, int y, int width, int height, int kernelSize)
+    {
+        if (width <= 0)
+            throw new ArgumentOutOfRangeException(nameof(width));
+        if (height <= 0)
+            throw new ArgumentOutOfRangeException(nameof(height));
+
+        kernelSize = NormalizeOddKernel(kernelSize);
+        if (kernelSize <= 1)
+            return imageBytes;
+
+        if (OperatingSystem.IsBrowser())
+        {
+            var raw = GetRawOrThrow(imageBytes);
+
+            x = Math.Clamp(x, 0, raw.Width - 1);
+            y = Math.Clamp(y, 0, raw.Height - 1);
+            width = Math.Clamp(width, 1, raw.Width - x);
+            height = Math.Clamp(height, 1, raw.Height - y);
+
+            var originalRegion = Raw.RgbaImageOps.Crop(raw, x, y, width, height);
+            var blurred = Raw.RgbaImageOps.GaussianBlur(originalRegion, kernelSize);
+
+            // Preserve alpha channel to avoid unexpected transparency changes.
+            var fixedBytes = blurred.RgbaBytes.ToArray();
+            for (var i = 3; i < fixedBytes.Length && i < originalRegion.RgbaBytes.Length; i += 4)
+                fixedBytes[i] = originalRegion.RgbaBytes[i];
+
+            var blurredFixed = new RawRgbaImage(blurred.Width, blurred.Height, fixedBytes);
+            var merged = Raw.RgbaImageOps.Blit(raw, blurredFixed, x, y);
+            return ReturnToken(merged);
+        }
+
+        using var src = Decode(imageBytes);
+        using var split = SplitBgrAndAlpha(src);
+        using var work = split.Bgr.Clone();
+
+        x = Math.Clamp(x, 0, work.Width - 1);
+        y = Math.Clamp(y, 0, work.Height - 1);
+        width = Math.Clamp(width, 1, work.Width - x);
+        height = Math.Clamp(height, 1, work.Height - y);
+
+        var rect = new Rect(x, y, width, height);
+        using (var roi = new Mat(work, rect))
+        using (var dst = new Mat())
+        {
+            Cv2.GaussianBlur(roi, dst, new Size(kernelSize, kernelSize), 0);
+            dst.CopyTo(roi);
+        }
+
+        if (split.Alpha is not null)
+        {
+            using var merged = MergeBgrAndAlpha(work, split.Alpha);
+            return EncodeForDisplay(merged);
+        }
+
+        return EncodeForDisplay(work);
+    }
+
+    public byte[] SharpenRegion(byte[] imageBytes, int x, int y, int width, int height, double amount)
+    {
+        if (width <= 0)
+            throw new ArgumentOutOfRangeException(nameof(width));
+        if (height <= 0)
+            throw new ArgumentOutOfRangeException(nameof(height));
+
+        amount = Math.Clamp(amount, 0, 3);
+        if (amount <= 0.0001)
+            return imageBytes;
+
+        if (OperatingSystem.IsBrowser())
+        {
+            var raw = GetRawOrThrow(imageBytes);
+
+            x = Math.Clamp(x, 0, raw.Width - 1);
+            y = Math.Clamp(y, 0, raw.Height - 1);
+            width = Math.Clamp(width, 1, raw.Width - x);
+            height = Math.Clamp(height, 1, raw.Height - y);
+
+            var region = Raw.RgbaImageOps.Crop(raw, x, y, width, height);
+            var sharpened = Raw.RgbaImageOps.Sharpen(region, amount);
+            var merged = Raw.RgbaImageOps.Blit(raw, sharpened, x, y);
+            return ReturnToken(merged);
+        }
+
+        using var src = Decode(imageBytes);
+        using var split = SplitBgrAndAlpha(src);
+        using var work = split.Bgr.Clone();
+
+        x = Math.Clamp(x, 0, work.Width - 1);
+        y = Math.Clamp(y, 0, work.Height - 1);
+        width = Math.Clamp(width, 1, work.Width - x);
+        height = Math.Clamp(height, 1, work.Height - y);
+
+        var rect = new Rect(x, y, width, height);
+
+        using (var roi = new Mat(work, rect))
+        using (var dst = new Mat())
+        using (var kernel = new Mat(3, 3, MatType.CV_32FC1))
+        {
+            // Adjustable sharpen kernel (unsharp-ish):
+            // [ 0, -a, 0
+            //  -a, 1+4a, -a
+            //   0, -a, 0 ]
+            var a = (float)amount;
+            kernel.SetArray(new float[]
+            {
+                0f, -a, 0f,
+                -a, 1f + 4f * a, -a,
+                0f, -a, 0f
+            });
+
+            Cv2.Filter2D(roi, dst, roi.Type(), kernel);
+            dst.CopyTo(roi);
+        }
+
+        if (split.Alpha is not null)
+        {
+            using var merged = MergeBgrAndAlpha(work, split.Alpha);
+            return EncodeForDisplay(merged);
+        }
+
+        return EncodeForDisplay(work);
+    }
+
     public byte[] Crop(byte[] imageBytes, int x, int y, int width, int height)
     {
         if (width <= 0)

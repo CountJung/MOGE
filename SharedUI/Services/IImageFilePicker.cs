@@ -8,4 +8,6 @@ public sealed record ImagePickResult(
 public interface IImageFilePicker
 {
     Task<ImagePickResult?> PickImageAsync(CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<ImagePickResult>> PickImagesAsync(CancellationToken cancellationToken = default);
 }

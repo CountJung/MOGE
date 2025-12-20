@@ -9,22 +9,37 @@ internal sealed class MauiImageFilePicker : IImageFilePicker
 
     public async Task<ImagePickResult?> PickImageAsync(CancellationToken cancellationToken = default)
     {
-        var result = await FilePicker.Default.PickAsync(new PickOptions
+        var results = await PickImagesAsync(cancellationToken);
+        return results.Count > 0 ? results[0] : null;
+    }
+
+    public async Task<IReadOnlyList<ImagePickResult>> PickImagesAsync(CancellationToken cancellationToken = default)
+    {
+        var results = await FilePicker.Default.PickMultipleAsync(new PickOptions
         {
-            PickerTitle = "Open image",
+            PickerTitle = "Open image(s)",
             FileTypes = FilePickerFileType.Images
         });
 
-        if (result is null)
-            return null;
+        if (results is null)
+            return Array.Empty<ImagePickResult>();
 
-        await using var input = await result.OpenReadAsync();
-        await using var buffer = StreamManager.GetStream();
-        await input.CopyToAsync(buffer, cancellationToken);
+        var list = new List<ImagePickResult>();
+        foreach (var item in results)
+        {
+            if (item is null)
+                continue;
 
-        return new ImagePickResult(
-            result.FileName,
-            result.ContentType ?? "application/octet-stream",
-            buffer.ToArray());
+            await using var input = await item.OpenReadAsync();
+            await using var buffer = StreamManager.GetStream();
+            await input.CopyToAsync(buffer, cancellationToken);
+
+            list.Add(new ImagePickResult(
+                item.FileName,
+                item.ContentType ?? "application/octet-stream",
+                buffer.ToArray()));
+        }
+
+        return list;
     }
 }

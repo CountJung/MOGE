@@ -5,13 +5,26 @@
     <MudStack Spacing="2">
         <MudText Typo="Typo.subtitle2">Tools</MudText>
 
-        <MudSelect T="CanvasInteractionMode" Value="@InteractionMode" ValueChanged="InteractionModeChanged" Dense="true" Disabled="@(!HasImage || PerspectiveMode || CropMode)">
-            <MudSelectItem Value="CanvasInteractionMode.PanZoom">Pan/Zoom</MudSelectItem>
-            <MudSelectItem Value="CanvasInteractionMode.Brush">Brush</MudSelectItem>
-            <MudSelectItem Value="CanvasInteractionMode.Eraser">Eraser</MudSelectItem>
-        </MudSelect>
+        <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+            <MudTooltip Text="Pan/Zoom">
+                <MudIconButton Icon="@Icons.Material.Filled.PanTool" Color="@(IsPanZoom ? Color.Primary : Color.Inherit)"
+                               Disabled="@ToolDisabled" OnClick="SelectPanZoom" aria-label="Tool: Pan/Zoom" />
+            </MudTooltip>
+            <MudTooltip Text="Brush">
+                <MudIconButton Icon="@Icons.Material.Filled.Brush" Color="@(IsBrush ? Color.Primary : Color.Inherit)"
+                               Disabled="@ToolDisabled" OnClick="SelectBrush" aria-label="Tool: Brush" />
+            </MudTooltip>
+            <MudTooltip Text="Eraser">
+                <MudIconButton Icon="@Icons.Material.Filled.AutoFixOff" Color="@(IsEraser ? Color.Primary : Color.Inherit)"
+                               Disabled="@ToolDisabled" OnClick="SelectEraser" aria-label="Tool: Eraser" />
+            </MudTooltip>
+            <MudTooltip Text="Selection (rectangle)">
+                <MudIconButton Icon="@Icons.Material.Filled.SelectAll" Color="@(IsSelection ? Color.Primary : Color.Inherit)"
+                               Disabled="@ToolDisabled" OnClick="SelectSelection" aria-label="Tool: Selection" />
+            </MudTooltip>
+        </MudStack>
 
-        @if (InteractionMode != CanvasInteractionMode.PanZoom)
+        @if (!IsPanZoom && !IsSelection)
         {
             <MudText Typo="Typo.caption">Brush Size</MudText>
             <MudSlider T="int" Value="@BrushRadius" ValueChanged="BrushRadiusChanged" Min="1" Max="64" Step="1" Color="Color.Primary" Disabled="@(!HasImage || PerspectiveMode || CropMode)" />
@@ -26,6 +39,30 @@
         {
             <MudText Typo="Typo.caption">Crop mode disables drawing tools.</MudText>
         }
+
+        <MudDivider />
+        <MudText Typo="Typo.subtitle2">Selection</MudText>
+
+        <MudText Typo="Typo.caption">Use the Selection tool to set the area.</MudText>
+
+        <MudText Typo="Typo.caption">Blur (selected area)</MudText>
+        <MudSlider T="int" Value="@SelectionBlurKernelSize" ValueChanged="SelectionBlurKernelSizeChanged" Min="0" Max="31" Step="1" Color="Color.Primary"
+                   Disabled="@(!HasImage || !SelectionMode)" />
+
+        <MudText Typo="Typo.caption">Sharpen (selected area)</MudText>
+        <MudSlider T="double" Value="@SharpenAmount" ValueChanged="SharpenAmountChanged" Min="0" Max="3" Step="0.1" Color="Color.Primary"
+                   Disabled="@(!HasImage || !SelectionMode)" />
+
+        <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+            <MudTooltip Text="Apply blur to selection">
+                <MudIconButton Icon="@Icons.Material.Filled.BlurOn" Disabled="@(!HasImage || !SelectionMode)"
+                               OnClick="@(async () => await ApplySelectionBlur.InvokeAsync())" aria-label="Apply blur to selection" />
+            </MudTooltip>
+            <MudTooltip Text="Apply sharpen to selection">
+                <MudIconButton Icon="@Icons.Material.Filled.AutoFixHigh" Disabled="@(!HasImage || !SelectionMode)"
+                               OnClick="@(async () => await ApplySelectionSharpen.InvokeAsync())" aria-label="Apply sharpen to selection" />
+            </MudTooltip>
+        </MudStack>
     </MudStack>
 </MudPaper>
 
@@ -39,4 +76,64 @@
 
     [Parameter] public int BrushRadius { get; set; }
     [Parameter] public EventCallback<int> BrushRadiusChanged { get; set; }
+
+    [Parameter] public bool SelectionMode { get; set; }
+    [Parameter] public EventCallback<bool> SelectionModeChanged { get; set; }
+
+    [Parameter] public int SelectionBlurKernelSize { get; set; }
+    [Parameter] public EventCallback<int> SelectionBlurKernelSizeChanged { get; set; }
+
+    [Parameter] public double SharpenAmount { get; set; }
+    [Parameter] public EventCallback<double> SharpenAmountChanged { get; set; }
+
+    [Parameter] public EventCallback ApplySelectionBlur { get; set; }
+    [Parameter] public EventCallback ApplySelectionSharpen { get; set; }
+
+    private bool ToolDisabled => !HasImage || PerspectiveMode || CropMode;
+
+    private bool IsSelection => SelectionMode;
+    private bool IsPanZoom => !SelectionMode && InteractionMode == CanvasInteractionMode.PanZoom;
+    private bool IsBrush => !SelectionMode && InteractionMode == CanvasInteractionMode.Brush;
+    private bool IsEraser => !SelectionMode && InteractionMode == CanvasInteractionMode.Eraser;
+
+    private async Task SelectPanZoom()
+    {
+        if (ToolDisabled)
+            return;
+
+        if (SelectionMode)
+            await SelectionModeChanged.InvokeAsync(false);
+
+        await InteractionModeChanged.InvokeAsync(CanvasInteractionMode.PanZoom);
+    }
+
+    private async Task SelectBrush()
+    {
+        if (ToolDisabled)
+            return;
+
+        if (SelectionMode)
+            await SelectionModeChanged.InvokeAsync(false);
+
+        await InteractionModeChanged.InvokeAsync(CanvasInteractionMode.Brush);
+    }
+
+    private async Task SelectEraser()
+    {
+        if (ToolDisabled)
+            return;
+
+        if (SelectionMode)
+            await SelectionModeChanged.InvokeAsync(false);
+
+        await InteractionModeChanged.InvokeAsync(CanvasInteractionMode.Eraser);
+    }
+
+    private async Task SelectSelection()
+    {
+        if (ToolDisabled)
+            return;
+
+        await SelectionModeChanged.InvokeAsync(true);
+    }
 }

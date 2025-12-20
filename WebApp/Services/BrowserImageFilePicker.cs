@@ -15,30 +15,42 @@ internal sealed class BrowserImageFilePicker(IJSRuntime js, BrowserRawImageProvi
 
     public async Task<ImagePickResult?> PickImageAsync(CancellationToken cancellationToken = default)
     {
-        var picked = await _js.InvokeAsync<Picked?>(
-            "mogeFilePicker.pickImage",
+        var picks = await PickImagesAsync(cancellationToken);
+        return picks.Count > 0 ? picks[0] : null;
+    }
+
+    public async Task<IReadOnlyList<ImagePickResult>> PickImagesAsync(CancellationToken cancellationToken = default)
+    {
+        var picked = await _js.InvokeAsync<Picked[]>(
+            "mogeFilePicker.pickImages",
             cancellationToken);
 
-        if (picked is null)
-            return null;
+        if (picked is null || picked.Length == 0)
+            return Array.Empty<ImagePickResult>();
 
-        var bytes = Convert.FromBase64String(picked.base64);
-
-        // Cache raw RGBA for OpenCV-decode fallback on WASM.
-        if (picked.width > 0 && picked.height > 0 && !string.IsNullOrWhiteSpace(picked.rgbaBase64))
+        var results = new List<ImagePickResult>(picked.Length);
+        foreach (var item in picked)
         {
-            try
+            var bytes = Convert.FromBase64String(item.base64);
+
+            // Cache raw RGBA for OpenCV-decode fallback on WASM.
+            if (item.width > 0 && item.height > 0 && !string.IsNullOrWhiteSpace(item.rgbaBase64))
             {
-                var rgba = Convert.FromBase64String(picked.rgbaBase64!);
-                var signature = ImageSignature.Create(bytes);
-                _rawProvider.Set(signature, picked.width, picked.height, rgba);
+                try
+                {
+                    var rgba = Convert.FromBase64String(item.rgbaBase64!);
+                    var signature = ImageSignature.Create(bytes);
+                    _rawProvider.Set(signature, item.width, item.height, rgba);
+                }
+                catch
+                {
+                }
             }
-            catch
-            {
-            }
+
+            results.Add(new ImagePickResult(item.fileName, item.contentType, bytes));
         }
 
-        return new ImagePickResult(picked.fileName, picked.contentType, bytes);
+        return results;
     }
 
     // Signature generation moved to SharedUI.Services.Raw.ImageSignature

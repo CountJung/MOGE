@@ -134,5 +134,70 @@ window.mogeFilePicker = {
       document.body.appendChild(input);
       input.click();
     });
+  },
+
+  pickImages: () => {
+    return new Promise((resolve) => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/*';
+      input.multiple = true;
+      input.style.display = 'none';
+
+      input.addEventListener('change', async () => {
+        try {
+          const files = input.files ? Array.from(input.files) : [];
+          if (!files.length) {
+            resolve([]);
+            return;
+          }
+
+          const results = [];
+          for (const file of files) {
+            // Normalize to PNG in the browser so WASM OpenCV doesn't need to decode
+            // platform-specific formats (e.g., HEIC/AVIF/WebP).
+            try {
+              const rgbaInfo = await window.mogeFilePicker._toRgbaBytes(file);
+              const pngBlob = await window.mogeFilePicker._convertToPngBlob(file);
+
+              if (pngBlob && rgbaInfo && rgbaInfo.rgba) {
+                const base64 = await window.mogeFilePicker._blobToBase64(pngBlob);
+                const rgbaBlob = new Blob([rgbaInfo.rgba], { type: 'application/octet-stream' });
+                const rgbaBase64 = await window.mogeFilePicker._blobToBase64(rgbaBlob);
+
+                results.push({
+                  fileName: window.mogeFilePicker._replaceExtension(file.name, '.png'),
+                  contentType: 'image/png',
+                  base64,
+                  width: rgbaInfo.width,
+                  height: rgbaInfo.height,
+                  rgbaBase64
+                });
+                continue;
+              }
+            } catch {
+              // Fallback to raw bytes (may still fail to decode in OpenCV on WASM).
+            }
+
+            const base64 = await window.mogeFilePicker._blobToBase64(file);
+            results.push({
+              fileName: file.name,
+              contentType: file.type || 'application/octet-stream',
+              base64,
+              width: 0,
+              height: 0,
+              rgbaBase64: null
+            });
+          }
+
+          resolve(results);
+        } finally {
+          input.remove();
+        }
+      });
+
+      document.body.appendChild(input);
+      input.click();
+    });
   }
 };

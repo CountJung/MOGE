@@ -71,6 +71,8 @@
     [Parameter] public IReadOnlyList<CanvasPoint>? Handles { get; set; }
     [Parameter] public EventCallback<IReadOnlyList<CanvasPoint>> HandlesChanged { get; set; }
 
+    [Parameter] public EventCallback<ElementReference> CanvasReady { get; set; }
+
     private ElementReference _canvas;
 
     private byte[]? _lastBytes;
@@ -160,6 +162,9 @@
     {
         if (firstRender)
         {
+            if (CanvasReady.HasDelegate)
+                await CanvasReady.InvokeAsync(_canvas);
+
             await RedrawAsync();
         }
     }
