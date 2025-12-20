@@ -1,0 +1,509 @@
+@page "/"
+
+@implements IDisposable
+
+@using OpenCvSharp
+
+@inject IImageFilePicker ImageFilePicker
+@inject ImageDocumentState Document
+@inject ImageProcessorService ImageProcessor
+
+<MudGrid Class="pa-4" Spacing="2">
+    <MudItem xs="12">
+        <MudPaper Class="pa-4" Elevation="1">
+            <MudStack Spacing="2">
+                <MudText Typo="Typo.h5">Editor</MudText>
+
+                <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="PickImageAsync">
+                        Open Image
+                    </MudButton>
+
+                    @if (Document.HasImage)
+                    {
+                        <MudText Typo="Typo.body2">@Document.FileName (@(Document.Bytes!.Length / 1024) KB)</MudText>
+                        <MudButton Variant="Variant.Text" Color="Color.Error" OnClick="Clear">Clear</MudButton>
+                    }
+                    else
+                    {
+                        <MudText Typo="Typo.body2">No image loaded</MudText>
+                    }
+                </MudStack>
+
+                <MudDivider />
+                <MudText Typo="Typo.body2">Use the Properties panel (right) for filters and perspective.</MudText>
+            </MudStack>
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12">
+        <ImageCanvas ImageBytes="@_viewBytes" ContentType="@Document.ContentType"
+                    EnableHandles="@_perspectiveMode"
+                    Handles="@_handles"
+                    HandlesChanged="OnHandlesChanged" />
+    </MudItem>
+</MudGrid>
+
+@code {
+    [CascadingParameter] public SharedUI.Layout.MainLayout? Layout { get; set; }
+
+    private byte[]? _viewBytes;
+    private const int MaxHistoryEntries = 50;
+    private sealed record HistoryEntry(byte[] Bytes, string Label, DateTime Timestamp, string? ThumbnailDataUrl);
+    private readonly List<HistoryEntry> _history = new();
+    private int _historyIndex = -1;
+
+    private bool _perspectiveMode;
+    private List<CanvasPoint> _handles = new();
+    private int _imageWidth;
+    private int _imageHeight;
+
+    private int _blurKernelSize;
+    private bool _grayscale;
+    private bool _sepia;
+    private bool _canny;
+    private double _cannyT1 = 50;
+    private double _cannyT2 = 150;
+    private double _contrast = 1.0;
+    private double _brightness;
+
+    private CancellationTokenSource? _debounceCts;
+    private string? _status;
+
+    private byte[]? CurrentBytes
+        => _historyIndex >= 0 && _historyIndex < _history.Count
+            ? _history[_historyIndex].Bytes
+            : Document.Bytes;
+
+    private bool CanUndo => Document.HasImage && _historyIndex > 0;
+    private bool CanRedo => Document.HasImage && _historyIndex >= 0 && _historyIndex < _history.Count - 1;
+
+    protected override void OnInitialized()
+    {
+        Document.Changed += OnDocChanged;
+        SyncFromDocument();
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (firstRender)
+            RefreshRightPanel();
+    }
+
+    private void OnDocChanged()
+    {
+        SyncFromDocument();
+        RefreshRightPanel();
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void SyncFromDocument()
+    {
+        _debounceCts?.Cancel();
+        _debounceCts?.Dispose();
+        _debounceCts = null;
+
+        _perspectiveMode = false;
+
+        _history.Clear();
+        _historyIndex = -1;
+
+        _blurKernelSize = 0;
+        _grayscale = false;
+        _sepia = false;
+        _canny = false;
+        _cannyT1 = 50;
+        _cannyT2 = 150;
+        _contrast = 1.0;
+        _brightness = 0;
+
+        if (Document.Bytes is { Length: > 0 } bytes)
+        {
+            var thumb = ImageProcessor.CreateThumbnailDataUrl(bytes);
+            _history.Add(new HistoryEntry(bytes, "Original", DateTime.UtcNow, thumb));
+            _historyIndex = 0;
+        }
+
+        _viewBytes = CurrentBytes;
+        _handles = new();
+        (_imageWidth, _imageHeight) = ImageProcessor.GetSize(CurrentBytes);
+        _status = null;
+    }
+
+    private async Task PickImageAsync()
+    {
+        var pick = await ImageFilePicker.PickImageAsync();
+        if (pick is null)
+            return;
+
+        Document.Set(pick);
+    }
+
+    private void Clear() => Document.Clear();
+
+    private void RefreshRightPanel()
+    {
+        Layout?.SetRightPanel(RightPanel);
+    }
+
+    private RenderFragment RightPanel => @<MudStack Spacing="2">
+        <MudSwitch T="bool" Value="@_perspectiveMode" ValueChanged="OnPerspectiveModeChanged" Color="Color.Primary" Label="Perspective Mode" />
+
+        @if (_perspectiveMode)
+        {
+            <MudText Typo="Typo.caption">Drag the 4 points on the canvas, then apply.</MudText>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="@(!Document.HasImage)" OnClick="ApplyPerspectiveAsync">Apply Perspective</MudButton>
+        }
+
+        <MudDivider />
+        <MudText Typo="Typo.subtitle2">Transform</MudText>
+        <MudStack Row="true" Spacing="1">
+            <MudButton Variant="Variant.Outlined" Disabled="@(!Document.HasImage)" OnClick="RotateLeftAsync">Rotate Left</MudButton>
+            <MudButton Variant="Variant.Outlined" Disabled="@(!Document.HasImage)" OnClick="RotateRightAsync">Rotate Right</MudButton>
+        </MudStack>
+        <MudButton Variant="Variant.Outlined" Disabled="@(!Document.HasImage)" OnClick="ResizeHalfAsync">Resize 50%</MudButton>
+
+        <MudDivider />
+        <MudText Typo="Typo.subtitle2">Filters</MudText>
+
+        <MudText Typo="Typo.caption">Blur Kernel</MudText>
+        <MudSlider T="int" Value="@_blurKernelSize" ValueChanged="OnBlurChanged" Min="0" Max="31" Step="1" Color="Color.Primary" />
+
+        <MudSwitch T="bool" Value="@_grayscale" ValueChanged="OnGrayscaleChanged" Color="Color.Primary" Label="Grayscale" Disabled="@_sepia" />
+        <MudSwitch T="bool" Value="@_sepia" ValueChanged="OnSepiaChanged" Color="Color.Primary" Label="Sepia" />
+
+        <MudSwitch T="bool" Value="@_canny" ValueChanged="OnCannyChanged" Color="Color.Primary" Label="Canny Edge" />
+
+        @if (_canny)
+        {
+            <MudText Typo="Typo.caption">Canny T1</MudText>
+            <MudSlider T="double" Value="@_cannyT1" ValueChanged="OnCannyT1Changed" Min="0" Max="255" Step="1" Color="Color.Primary" />
+            <MudText Typo="Typo.caption">Canny T2</MudText>
+            <MudSlider T="double" Value="@_cannyT2" ValueChanged="OnCannyT2Changed" Min="0" Max="255" Step="1" Color="Color.Primary" />
+        }
+
+        <MudText Typo="Typo.caption">Contrast</MudText>
+        <MudSlider T="double" Value="@_contrast" ValueChanged="OnContrastChanged" Min="0.5" Max="3.0" Step="0.05" Color="Color.Primary" />
+        <MudText Typo="Typo.caption">Brightness</MudText>
+        <MudSlider T="double" Value="@_brightness" ValueChanged="OnBrightnessChanged" Min="-100" Max="100" Step="1" Color="Color.Primary" />
+
+        <MudDivider />
+        <MudText Typo="Typo.subtitle2">History</MudText>
+        <MudStack Row="true" Spacing="1">
+            <MudButton Variant="Variant.Outlined" Disabled="@(!CanUndo)" OnClick="UndoAsync">Undo</MudButton>
+            <MudButton Variant="Variant.Outlined" Disabled="@(!CanRedo)" OnClick="RedoAsync">Redo</MudButton>
+            <MudButton Variant="Variant.Outlined" Disabled="@(!CanUndo)" OnClick="ResetToOriginalAsync">Reset</MudButton>
+        </MudStack>
+
+        <MudList T="string" Dense="true">
+            @for (var i = 0; i < _history.Count; i++)
+            {
+                var idx = i;
+                <MudListItem T="string" Value="@GetHistoryLabel(idx)" OnClick="@(async () => await GoToHistoryAsync(idx))" Disabled="@(!Document.HasImage)">
+                    <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                        @if (!string.IsNullOrWhiteSpace(_history[idx].ThumbnailDataUrl))
+                        {
+                            <img src="@_history[idx].ThumbnailDataUrl" width="40" height="40" style="object-fit:contain" />
+                        }
+                        <MudText Typo="Typo.caption">@GetHistoryLabel(idx)</MudText>
+                    </MudStack>
+                </MudListItem>
+            }
+        </MudList>
+
+        @if (!string.IsNullOrWhiteSpace(_status))
+        {
+            <MudText Typo="Typo.caption">@_status</MudText>
+        }
+    </MudStack>;
+
+    private Task OnPerspectiveModeChanged(bool enabled)
+    {
+        _perspectiveMode = enabled;
+
+        if (!enabled)
+        {
+            _ = ApplyPipelineDebouncedAsync();
+            RefreshRightPanel();
+            return Task.CompletedTask;
+        }
+
+        if (!Document.HasImage)
+        {
+            _perspectiveMode = false;
+            RefreshRightPanel();
+            return Task.CompletedTask;
+        }
+
+        var baseBytes = CurrentBytes;
+        _viewBytes = baseBytes;
+
+        (_imageWidth, _imageHeight) = ImageProcessor.GetSize(baseBytes);
+        _handles = new List<CanvasPoint>
+        {
+            new(0, 0),
+            new(_imageWidth, 0),
+            new(_imageWidth, _imageHeight),
+            new(0, _imageHeight)
+        };
+
+        _status = "Perspective: editing points";
+        RefreshRightPanel();
+        StateHasChanged();
+
+        return Task.CompletedTask;
+    }
+
+    private Task OnHandlesChanged(IReadOnlyList<CanvasPoint> updated)
+    {
+        _handles = updated.ToList();
+        return Task.CompletedTask;
+    }
+
+    private async Task ApplyPerspectiveAsync()
+    {
+        if (!Document.HasImage)
+            return;
+
+        var src = _handles.Count == 4
+            ? _handles.Select(p => new Point2f((float)p.X, (float)p.Y)).ToArray()
+            : throw new InvalidOperationException("Expected 4 perspective points.");
+
+        var dst = new[]
+        {
+            new Point2f(0, 0),
+            new Point2f(_imageWidth, 0),
+            new Point2f(_imageWidth, _imageHeight),
+            new Point2f(0, _imageHeight)
+        };
+
+        _status = "Applying perspective...";
+        RefreshRightPanel();
+
+        var baseBytes = CurrentBytes!;
+        byte[] warped;
+        try
+        {
+            warped = await Task.Run(() => ImageProcessor.WarpPerspective(baseBytes, src, dst, _imageWidth, _imageHeight));
+        }
+        catch (Exception ex)
+        {
+            _status = ex.Message;
+            RefreshRightPanel();
+            StateHasChanged();
+            return;
+        }
+
+        _perspectiveMode = false;
+        CommitHistory(warped, "Perspective");
+
+        _status = "Perspective applied";
+        RefreshRightPanel();
+
+        await ApplyPipelineDebouncedAsync();
+    }
+
+    private async Task RotateLeftAsync()
+    {
+        await ApplyTransformAsync(bytes => ImageProcessor.Rotate90(bytes, RotateFlags.Rotate90Counterclockwise), "Rotating...", "Rotate Left");
+    }
+
+    private async Task RotateRightAsync()
+    {
+        await ApplyTransformAsync(bytes => ImageProcessor.Rotate90(bytes, RotateFlags.Rotate90Clockwise), "Rotating...", "Rotate Right");
+    }
+
+    private async Task ResizeHalfAsync()
+    {
+        await ApplyTransformAsync(bytes => ImageProcessor.ResizeByScale(bytes, 0.5), "Resizing...", "Resize 50%" );
+    }
+
+    private async Task ApplyTransformAsync(Func<byte[], byte[]> transform, string inProgressStatus, string label)
+    {
+        if (!Document.HasImage)
+            return;
+
+        _perspectiveMode = false;
+        _status = inProgressStatus;
+        RefreshRightPanel();
+        StateHasChanged();
+
+        var baseBytes = CurrentBytes!;
+        byte[] transformed;
+        try
+        {
+            transformed = await Task.Run(() => transform(baseBytes));
+        }
+        catch (Exception ex)
+        {
+            _status = ex.Message;
+            RefreshRightPanel();
+            StateHasChanged();
+            return;
+        }
+
+    CommitHistory(transformed, label);
+
+        _status = "Transform applied";
+        RefreshRightPanel();
+
+        await ApplyPipelineDebouncedAsync();
+    }
+
+    private Task OnBlurChanged(int v) { _blurKernelSize = v; return ApplyPipelineDebouncedAsync(); }
+    private Task OnGrayscaleChanged(bool v) { _grayscale = v; return ApplyPipelineDebouncedAsync(); }
+    private Task OnSepiaChanged(bool v) { _sepia = v; if (v) _grayscale = false; return ApplyPipelineDebouncedAsync(); }
+    private Task OnCannyChanged(bool v) { _canny = v; return ApplyPipelineDebouncedAsync(); }
+    private Task OnCannyT1Changed(double v) { _cannyT1 = v; return ApplyPipelineDebouncedAsync(); }
+    private Task OnCannyT2Changed(double v) { _cannyT2 = v; return ApplyPipelineDebouncedAsync(); }
+    private Task OnContrastChanged(double v) { _contrast = v; return ApplyPipelineDebouncedAsync(); }
+    private Task OnBrightnessChanged(double v) { _brightness = v; return ApplyPipelineDebouncedAsync(); }
+
+    private Task ApplyPipelineDebouncedAsync()
+    {
+        if (!Document.HasImage)
+        {
+            _viewBytes = null;
+            _status = null;
+            RefreshRightPanel();
+            StateHasChanged();
+            return Task.CompletedTask;
+        }
+
+        if (_perspectiveMode)
+            return Task.CompletedTask;
+
+        _debounceCts?.Cancel();
+        _debounceCts?.Dispose();
+        _debounceCts = new CancellationTokenSource();
+        var token = _debounceCts.Token;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(250, token);
+
+                var baseBytes = CurrentBytes!;
+                var settings = new ImageProcessorService.ProcessingSettings(
+                    BlurKernelSize: _blurKernelSize,
+                    Grayscale: _grayscale,
+                    Sepia: _sepia,
+                    Canny: _canny,
+                    CannyThreshold1: _cannyT1,
+                    CannyThreshold2: _cannyT2,
+                    Contrast: _contrast,
+                    Brightness: _brightness);
+
+                var processed = await Task.Run(() => ImageProcessor.ApplyPipeline(baseBytes, settings), token);
+
+                await InvokeAsync(() =>
+                {
+                    if (token.IsCancellationRequested)
+                        return;
+
+                    CommitHistory(processed, "Filters", replaceCurrentIfSameLabel: true);
+                    _status = "Updated";
+                    RefreshRightPanel();
+                    StateHasChanged();
+                });
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception ex)
+            {
+                await InvokeAsync(() =>
+                {
+                    _status = ex.Message;
+                    RefreshRightPanel();
+                    StateHasChanged();
+                });
+            }
+        }, token);
+
+        return Task.CompletedTask;
+    }
+
+    private void CommitHistory(byte[] bytes, string label, bool replaceCurrentIfSameLabel = false)
+    {
+        if (!Document.HasImage)
+            return;
+
+        // Drop redo states
+        if (_historyIndex >= 0 && _historyIndex < _history.Count - 1)
+            _history.RemoveRange(_historyIndex + 1, _history.Count - _historyIndex - 1);
+
+        var thumb = ImageProcessor.CreateThumbnailDataUrl(bytes);
+
+        if (replaceCurrentIfSameLabel && _historyIndex >= 0 && _historyIndex == _history.Count - 1 && _history[_historyIndex].Label == label)
+        {
+            _history[_historyIndex] = new HistoryEntry(bytes, label, DateTime.UtcNow, thumb);
+        }
+        else
+        {
+            _history.Add(new HistoryEntry(bytes, label, DateTime.UtcNow, thumb));
+            _historyIndex = _history.Count - 1;
+
+            if (_history.Count > MaxHistoryEntries)
+            {
+                var remove = _history.Count - MaxHistoryEntries;
+                _history.RemoveRange(0, remove);
+                _historyIndex = Math.Max(0, _historyIndex - remove);
+            }
+        }
+
+        _viewBytes = bytes;
+        (_imageWidth, _imageHeight) = ImageProcessor.GetSize(bytes);
+        _handles = new();
+    }
+
+    private string GetHistoryLabel(int index)
+    {
+        if (index < 0 || index >= _history.Count)
+            return string.Empty;
+
+        var prefix = index == _historyIndex ? "▶ " : string.Empty;
+        return prefix + _history[index].Label;
+    }
+
+    private Task UndoAsync() => GoToHistoryAsync(_historyIndex - 1);
+    private Task RedoAsync() => GoToHistoryAsync(_historyIndex + 1);
+    private Task ResetToOriginalAsync() => GoToHistoryAsync(0);
+
+    private Task GoToHistoryAsync(int index)
+    {
+        if (!Document.HasImage)
+            return Task.CompletedTask;
+        if (index < 0 || index >= _history.Count)
+            return Task.CompletedTask;
+
+        _debounceCts?.Cancel();
+        _debounceCts?.Dispose();
+        _debounceCts = null;
+
+        _perspectiveMode = false;
+        _historyIndex = index;
+
+        var bytes = CurrentBytes;
+        _viewBytes = bytes;
+        (_imageWidth, _imageHeight) = ImageProcessor.GetSize(bytes);
+        _handles = new();
+
+        _status = "History restored";
+        RefreshRightPanel();
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    public void Dispose()
+    {
+        Document.Changed -= OnDocChanged;
+
+        _debounceCts?.Cancel();
+        _debounceCts?.Dispose();
+        _debounceCts = null;
+
+        Layout?.SetRightPanel(null);
+    }
+}

@@ -1,0 +1,251 @@
+@using Microsoft.AspNetCore.Components.Web
+@using MudBlazor
+@using SharedUI.Services.Raw
+@implements IDisposable
+
+<MudPaper Elevation="1" Class="pa-2" Style="height: clamp(320px, 70vh, 720px);">
+    <div style="position:relative; width:100%; height:100%;">
+        <canvas @ref="_canvas" style="width:100%; height:100%; touch-action:none; display:block;"
+                @onwheel="OnWheel"
+                @onpointerdown="OnPointerDown"
+                @onpointermove="OnPointerMove"
+                @onpointerup="OnPointerUp"
+                @onpointerleave="OnPointerUp">
+        </canvas>
+
+        @if (EnableHandles && Handles is { Count: > 0 })
+        {
+            @for (var i = 0; i < Handles.Count; i++)
+            {
+                var handleIndex = i;
+                var p = Handles[i];
+                var screenX = _offsetX + (p.X * _scale);
+                var screenY = _offsetY + (p.Y * _scale);
+
+                <div style="position:absolute; left:@(screenX - 8)px; top:@(screenY - 8)px; width:16px; height:16px; border-radius:50%; background: var(--mud-palette-primary); touch-action:none;"
+                     @onpointerdown="(e) => OnHandlePointerDown(handleIndex, e)">
+                </div>
+            }
+        }
+    </div>
+</MudPaper>
+
+@code {
+    [Inject] private IJSRuntime Js { get; set; } = default!;
+    [Inject] private IRawImageProvider? RawProvider { get; set; }
+
+    [Parameter] public byte[]? ImageBytes { get; set; }
+    [Parameter] public string? ContentType { get; set; }
+
+    [Parameter] public bool EnableHandles { get; set; }
+    [Parameter] public IReadOnlyList<CanvasPoint>? Handles { get; set; }
+    [Parameter] public EventCallback<IReadOnlyList<CanvasPoint>> HandlesChanged { get; set; }
+
+    private ElementReference _canvas;
+
+    private byte[]? _lastBytes;
+
+    private double _scale = 1.0;
+    private double _offsetX;
+    private double _offsetY;
+
+    private bool _panning;
+    private double _lastClientX;
+    private double _lastClientY;
+
+    private int? _dragHandleIndex;
+    private DomRect? _cachedRect;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ReferenceEquals(ImageBytes, _lastBytes))
+            return;
+
+        _lastBytes = ImageBytes;
+
+        if (ImageBytes is null || ImageBytes.Length == 0)
+        {
+            await Js.InvokeVoidAsync("mogeCanvas.clear", _canvas);
+            _scale = 1;
+            _offsetX = 0;
+            _offsetY = 0;
+            return;
+        }
+
+        // Raw-token path (no OpenCV encoder available): render using cached RGBA pixels.
+        if (RawToken.IsToken(ImageBytes) && RawProvider is not null)
+        {
+            var sig = ImageSignature.Create(ImageBytes);
+            if (RawProvider.TryGet(sig, out var raw) && raw.RgbaBytes is { Length: > 0 })
+            {
+                await Js.InvokeVoidAsync("mogeCanvas.setRawRgba", _canvas, raw.Width, raw.Height, raw.RgbaBytes);
+                await RedrawAsync();
+                return;
+            }
+        }
+
+        var ct = InferContentType(ImageBytes, ContentType);
+        var dataUrl = $"data:{ct};base64,{Convert.ToBase64String(ImageBytes)}";
+        await Js.InvokeAsync<object>("mogeCanvas.setImage", _canvas, dataUrl);
+        await RedrawAsync();
+    }
+
+    private static string InferContentType(byte[] bytes, string? provided)
+    {
+        if (RawToken.IsToken(bytes))
+            return "application/x-moge-raw";
+
+        if (bytes.Length >= 12)
+        {
+            // PNG
+            if (bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47)
+                return "image/png";
+
+            // JPEG
+            if (bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF)
+                return "image/jpeg";
+
+            // GIF
+            if (bytes[0] == 0x47 && bytes[1] == 0x49 && bytes[2] == 0x46)
+                return "image/gif";
+
+            // BMP
+            if (bytes[0] == 0x42 && bytes[1] == 0x4D)
+                return "image/bmp";
+
+            // WEBP: RIFF....WEBP
+            if (bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46 &&
+                bytes[8] == 0x57 && bytes[9] == 0x45 && bytes[10] == 0x42 && bytes[11] == 0x50)
+                return "image/webp";
+        }
+
+        return string.IsNullOrWhiteSpace(provided) ? "image/png" : provided;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await RedrawAsync();
+        }
+    }
+
+    private async Task OnWheel(WheelEventArgs e)
+    {
+        if (ImageBytes is null || ImageBytes.Length == 0)
+            return;
+
+        var rect = await Js.InvokeAsync<DomRect>("mogeCanvas.getRect", _canvas);
+        var x = e.ClientX - rect.left;
+        var y = e.ClientY - rect.top;
+
+        var oldScale = _scale;
+        var zoom = e.DeltaY < 0 ? 1.1 : 0.9;
+        var newScale = Math.Clamp(oldScale * zoom, 0.05, 20.0);
+
+        if (Math.Abs(newScale - oldScale) < 0.0001)
+            return;
+
+        _offsetX = x - (x - _offsetX) * (newScale / oldScale);
+        _offsetY = y - (y - _offsetY) * (newScale / oldScale);
+        _scale = newScale;
+
+        await RedrawAsync();
+    }
+
+    private void OnPointerDown(PointerEventArgs e)
+    {
+        if (ImageBytes is null || ImageBytes.Length == 0)
+            return;
+
+        if (_dragHandleIndex is not null)
+            return;
+
+        _panning = true;
+        _lastClientX = e.ClientX;
+        _lastClientY = e.ClientY;
+    }
+
+    private async Task OnPointerMove(PointerEventArgs e)
+    {
+        if (_dragHandleIndex is not null && Handles is { Count: > 0 })
+        {
+            await MoveHandleAsync(e);
+            return;
+        }
+
+        if (!_panning)
+            return;
+
+        var dx = e.ClientX - _lastClientX;
+        var dy = e.ClientY - _lastClientY;
+        _lastClientX = e.ClientX;
+        _lastClientY = e.ClientY;
+
+        _offsetX += dx;
+        _offsetY += dy;
+
+        await RedrawAsync();
+    }
+
+    private async Task OnPointerUp(PointerEventArgs _)
+    {
+        _panning = false;
+        _dragHandleIndex = null;
+        _cachedRect = null;
+        await Task.CompletedTask;
+    }
+
+    private async Task OnHandlePointerDown(int index, PointerEventArgs e)
+    {
+        if (!EnableHandles || Handles is null)
+            return;
+
+        if ((uint)index >= (uint)Handles.Count)
+            return;
+
+        _dragHandleIndex = index;
+        _panning = false;
+        _cachedRect = await Js.InvokeAsync<DomRect>("mogeCanvas.getRect", _canvas);
+
+        _lastClientX = e.ClientX;
+        _lastClientY = e.ClientY;
+    }
+
+    private async Task MoveHandleAsync(PointerEventArgs e)
+    {
+        if (_dragHandleIndex is null || Handles is null || _cachedRect is null)
+            return;
+
+        var dragIndex = _dragHandleIndex.Value;
+        if ((uint)dragIndex >= (uint)Handles.Count)
+            return;
+
+        var rect = _cachedRect;
+        var x = e.ClientX - rect.left;
+        var y = e.ClientY - rect.top;
+
+        var imageX = (x - _offsetX) / _scale;
+        var imageY = (y - _offsetY) / _scale;
+
+        var updated = Handles.ToArray();
+        updated[dragIndex] = new CanvasPoint(imageX, imageY);
+
+        await HandlesChanged.InvokeAsync(updated);
+    }
+
+    private Task RedrawAsync()
+        => Js.InvokeAsync<object>("mogeCanvas.draw", _canvas, new { scale = _scale, offsetX = _offsetX, offsetY = _offsetY }).AsTask();
+
+    public void Dispose()
+    {
+    }
+
+    private sealed class DomRect
+    {
+        public double left { get; set; }
+        public double top { get; set; }
+        public double width { get; set; }
+        public double height { get; set; }
+    }
+}

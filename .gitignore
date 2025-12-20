@@ -1,0 +1,79 @@
+# --------------------------------------------
+# MOGE .gitignore (MAUI + Blazor WASM + RCL)
+# Goal: keep only source + configs in git
+# --------------------------------------------
+
+# OS
+Thumbs.db
+Thumbs.db:encryptable
+Desktop.ini
+.DS_Store
+
+# VS / VS Code / Rider
+.vs/
+.vscode/
+!.vscode/launch.json
+!.vscode/tasks.json
+!.vscode/settings.json
+!.vscode/extensions.json
+
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.userprefs
+
+# NuGet
+**/packages/
+
+# Build outputs
+**/bin/
+**/obj/
+
+# Dotnet tooling caches
+**/.vsconfig.user
+**/.dotnet/
+**/.toolstarget/
+
+# Logs
+**/*.log
+**/Logs/
+**/log/
+
+# Test results
+**/TestResults/
+
+# Publish / artifacts
+**/publish/
+**/app.publish/
+**/AppPackages/
+**/Artifacts/
+
+# Blazor / WASM generated assets (under build output)
+# (These are already covered by **/bin and **/obj)
+
+# Local secrets / settings
+**/appsettings.Development.json
+**/appsettings.*.Development.json
+**/secrets.json
+**/*.pfx
+**/*.snk
+
+# Node (in case tooling is added later)
+**/node_modules/
+
+# JetBrains / ReSharper
+_ReSharper*/
+*.[Rr]e[Ss]harper
+
+# Coverage
+**/coverage/
+**/coverage.*
+
+# Temporary / backups
+*.tmp
+*.bak
+*.swp
+*.swo
+*~

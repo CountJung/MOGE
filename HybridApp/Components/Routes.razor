@@ -1,0 +1,60 @@
+﻿@inject SharedUI.Logging.MogeLogService Log
+
+<ErrorBoundary @ref="_errorBoundary">
+    <ChildContent>
+        <Router AppAssembly="typeof(MauiProgram).Assembly"
+                AdditionalAssemblies="new[] { typeof(SharedUI.SharedUIMarker).Assembly }"
+                >
+            <Found Context="routeData">
+                <RouteView RouteData="routeData" DefaultLayout="typeof(SharedUI.Layout.MainLayout)" />
+                <FocusOnNavigate RouteData="routeData" Selector="h1" />
+            </Found>
+
+            <NotFound>
+                <LayoutView Layout="typeof(SharedUI.Layout.MainLayout)">
+                    <SharedUI.Pages.NotFound />
+                </LayoutView>
+            </NotFound>
+        </Router>
+    </ChildContent>
+
+    <ErrorContent Context="ex">
+        @{ LogExceptionOnce(ex); }
+        <div style="padding: 16px; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;">
+            <h3>앱 시작 오류</h3>
+            <p>아래 예외/스택을 기반으로 원인을 추적하세요.</p>
+            <pre style="white-space: pre-wrap; word-break: break-word; background: #f5f5f5; padding: 12px; border-radius: 6px;">@ex.ToString()</pre>
+            <button class="btn btn-primary" @onclick="Recover">Recover</button>
+        </div>
+    </ErrorContent>
+</ErrorBoundary>
+
+@code {
+    private ErrorBoundary? _errorBoundary;
+
+    private string? _lastLoggedSignature;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Log.InitializeAsync();
+        Log.Info("HybridApp starting");
+    }
+
+    private void Recover()
+    {
+        _errorBoundary?.Recover();
+    }
+
+    private void LogExceptionOnce(Exception ex)
+    {
+        var signature = ex.ToString();
+        if (string.Equals(_lastLoggedSignature, signature, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _lastLoggedSignature = signature;
+
+        try { Log.Log(Microsoft.Extensions.Logging.LogLevel.Critical, "HybridApp.ErrorBoundary", "Unhandled exception", ex); } catch { }
+    }
+}

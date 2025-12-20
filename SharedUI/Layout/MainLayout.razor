@@ -1,0 +1,158 @@
+@inherits LayoutComponentBase
+
+<CascadingValue Value="this" IsFixed="true">
+    <MudThemeProvider IsDarkMode="_isDarkMode" />
+    <MudPopoverProvider />
+    <MudDialogProvider />
+    <MudSnackbarProvider />
+
+    <MudBreakpointProvider OnBreakpointChanged="OnBreakpointChanged" />
+
+    <MudLayout>
+        <MudAppBar Dense="true">
+            <MudHidden Breakpoint="Breakpoint.MdAndUp">
+                <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="ToggleLeft" />
+            </MudHidden>
+
+            <MudText Typo="Typo.h6">MOGE</MudText>
+
+            <MudSpacer />
+
+            <MudStack Row="true" Spacing="0" AlignItems="AlignItems.Center">
+                <MudTooltip Text="System">
+                    <MudIconButton Icon="@Icons.Material.Filled.SettingsBrightness"
+                                   Color="@(_themeMode == ThemeMode.System ? Color.Primary : Color.Inherit)"
+                                   OnClick="@(async () => await OnThemeModeChanged(ThemeMode.System))"
+                                   aria-label="Theme: System" />
+                </MudTooltip>
+                <MudTooltip Text="Light">
+                    <MudIconButton Icon="@Icons.Material.Filled.LightMode"
+                                   Color="@(_themeMode == ThemeMode.Light ? Color.Primary : Color.Inherit)"
+                                   OnClick="@(async () => await OnThemeModeChanged(ThemeMode.Light))"
+                                   aria-label="Theme: Light" />
+                </MudTooltip>
+                <MudTooltip Text="Dark">
+                    <MudIconButton Icon="@Icons.Material.Filled.DarkMode"
+                                   Color="@(_themeMode == ThemeMode.Dark ? Color.Primary : Color.Inherit)"
+                                   OnClick="@(async () => await OnThemeModeChanged(ThemeMode.Dark))"
+                                   aria-label="Theme: Dark" />
+                </MudTooltip>
+            </MudStack>
+
+            <MudHidden Breakpoint="Breakpoint.MdAndUp">
+                <MudIconButton Icon="@Icons.Material.Filled.Tune" Color="Color.Inherit" Edge="Edge.End" OnClick="ToggleRight" />
+            </MudHidden>
+        </MudAppBar>
+
+        <MudDrawer Anchor="Anchor.Left" Elevation="1" Variant="@LeftVariant" Open="@LeftOpen" OpenChanged="OnLeftOpenChanged" Breakpoint="Breakpoint.Md">
+            <MudNavMenu>
+                <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Edit">Editor</MudNavLink>
+            </MudNavMenu>
+        </MudDrawer>
+
+        <MudDrawer Anchor="@RightAnchor" Elevation="1" Variant="@RightVariant" Open="@RightOpen" OpenChanged="OnRightOpenChanged" Breakpoint="Breakpoint.Md" Width="@RightDrawerWidth" Style="@RightDrawerStyle">
+            <MudStack Spacing="2" Class="pa-3" Style="overflow:auto; max-height:100%;">
+                <MudText Typo="Typo.subtitle1">Properties</MudText>
+                @if (RightPanel is null)
+                {
+                    <MudText Typo="Typo.body2">Select a tool or filter to edit.</MudText>
+                }
+                else
+                {
+                    @RightPanel
+                }
+            </MudStack>
+        </MudDrawer>
+
+        <MudMainContent>
+            <MudContainer MaxWidth="MaxWidth.False" Class="pa-0">
+                @Body
+            </MudContainer>
+        </MudMainContent>
+    </MudLayout>
+</CascadingValue>
+
+@code {
+    public enum ThemeMode
+    {
+        System,
+        Light,
+        Dark
+    }
+
+    private bool _isMobile;
+    private bool _leftOpen = true;
+    private bool _rightOpen = true;
+
+    private ThemeMode _themeMode = ThemeMode.System;
+    private bool _systemPrefersDark;
+    private bool _isDarkMode;
+
+    protected RenderFragment? RightPanel { get; set; }
+
+    public void SetRightPanel(RenderFragment? fragment)
+    {
+        RightPanel = fragment;
+        StateHasChanged();
+    }
+
+    private DrawerVariant LeftVariant => _isMobile ? DrawerVariant.Temporary : DrawerVariant.Persistent;
+    private DrawerVariant RightVariant => _isMobile ? DrawerVariant.Temporary : DrawerVariant.Persistent;
+
+    private Anchor RightAnchor => _isMobile ? Anchor.Bottom : Anchor.Right;
+    private string RightDrawerWidth => _isMobile ? "100%" : "320px";
+    private string? RightDrawerStyle => _isMobile ? "max-height: 55vh;" : null;
+
+    private bool LeftOpen => _isMobile ? _leftOpen : true;
+    private bool RightOpen => _isMobile ? _rightOpen : true;
+
+    private Task OnBreakpointChanged(Breakpoint breakpoint)
+    {
+        var isMobile = breakpoint < Breakpoint.Md;
+        if (isMobile && !_isMobile)
+        {
+            _leftOpen = false;
+            _rightOpen = false;
+        }
+
+        _isMobile = isMobile;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private void ToggleLeft() => _leftOpen = !_leftOpen;
+    private void ToggleRight() => _rightOpen = !_rightOpen;
+
+    private Task OnLeftOpenChanged(bool open)
+    {
+        _leftOpen = open;
+        return Task.CompletedTask;
+    }
+
+    private Task OnRightOpenChanged(bool open)
+    {
+        _rightOpen = open;
+        return Task.CompletedTask;
+    }
+
+    private void OnSystemPreferenceChanged(bool prefersDark)
+    {
+        _systemPrefersDark = prefersDark;
+        if (_themeMode == ThemeMode.System)
+            _isDarkMode = prefersDark;
+    }
+
+    private Task OnThemeModeChanged(ThemeMode mode)
+    {
+        _themeMode = mode;
+        _isDarkMode = mode switch
+        {
+            ThemeMode.System => _systemPrefersDark,
+            ThemeMode.Light => false,
+            ThemeMode.Dark => true,
+            _ => _isDarkMode
+        };
+
+        return Task.CompletedTask;
+    }
+}

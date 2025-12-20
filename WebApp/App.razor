@@ -1,0 +1,43 @@
+﻿@inject SharedUI.Logging.MogeLogService Log
+
+<ErrorBoundary @ref="_errorBoundary">
+    <ChildContent>
+        <Router AppAssembly="@typeof(App).Assembly"
+                AdditionalAssemblies="new[] { typeof(SharedUIMarker).Assembly }"
+                >
+            <Found Context="routeData">
+                <RouteView RouteData="@routeData" DefaultLayout="@typeof(SharedUI.Layout.MainLayout)" />
+                <FocusOnNavigate RouteData="routeData" Selector="h1" />
+            </Found>
+
+            <NotFound>
+                <LayoutView Layout="@typeof(SharedUI.Layout.MainLayout)">
+                    <SharedUI.Pages.NotFound />
+                </LayoutView>
+            </NotFound>
+        </Router>
+    </ChildContent>
+
+    <ErrorContent Context="ex">
+        <div style="padding: 16px; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;">
+            <h3>앱 시작 오류</h3>
+            <pre style="white-space: pre-wrap; word-break: break-word; background: #f5f5f5; padding: 12px; border-radius: 6px;">@ex.ToString()</pre>
+            <button class="btn btn-primary" @onclick="Recover">Recover</button>
+        </div>
+    </ErrorContent>
+</ErrorBoundary>
+
+@code {
+    private ErrorBoundary? _errorBoundary;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Log.InitializeAsync();
+        Log.Info("WebApp starting");
+    }
+
+    private void Recover()
+    {
+        _errorBoundary?.Recover();
+    }
+}
