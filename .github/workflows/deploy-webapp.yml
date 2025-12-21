@@ -21,6 +21,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
@@ -40,7 +43,8 @@ jobs:
 
       - name: Update base path in index.html
         run: |
-          sed -i 's|<base href="/" />|<base href="/MOGE/" />|g' publish/wwwroot/index.html
+          REPO_NAME="${GITHUB_REPOSITORY#*/}"
+          sed -i "s|<base href=\"/\" />|<base href=\"/${REPO_NAME}/\" />|g" publish/wwwroot/index.html
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
