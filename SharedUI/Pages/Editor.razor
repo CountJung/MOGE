@@ -68,7 +68,7 @@
                        ApplySelectionSharpen="ApplySelectionSharpenAsync" />
     </MudItem>
 
-    <MudItem xs="12" md="9" lg="10">
+    <MudItem xs="12" md="7" lg="8">
         <ImageCanvas ImageBytes="@_viewBytes" ContentType="@Document.ContentType"
                     EnableHandles="@(_perspectiveMode || _cropMode || _selectionMode)"
                     HandlesAsRectangle="@(_cropMode || _selectionMode)"
@@ -78,6 +78,12 @@
                     BrushRadius="@_brushRadius"
                     CanvasReady="OnCanvasReady"
                     StrokeCommitted="OnStrokeCommittedAsync" />
+    </MudItem>
+
+    <MudItem xs="12" md="2" lg="2">
+        <MudPaper Elevation="1" Class="pa-2" Style="height: clamp(240px, 70vh, 720px); overflow:auto;">
+            @RightPanel
+        </MudPaper>
     </MudItem>
 </MudGrid>
 
@@ -262,7 +268,6 @@
 
     private void RefreshRightPanel()
     {
-        Layout?.SetRightPanel(RightPanel);
         Layout?.PushFooterMessage(_status);
     }
 
@@ -1012,6 +1017,6 @@
         _debounceCts?.Dispose();
         _debounceCts = null;
 
-        Layout?.SetRightPanel(null);
+        // Properties panel is rendered within the Editor page.
     }
 }

@@ -2,8 +2,6 @@ namespace SharedUI.Services.Settings;
 
 public sealed record AppSettings(
     AppThemeMode ThemeMode = AppThemeMode.System,
-    bool PropertiesPanelDefaultOpen = true,
-    bool AutoClosePropertiesOnMobileEnter = true,
 
     // Touch UX
     double TouchMinScale = 0.05,

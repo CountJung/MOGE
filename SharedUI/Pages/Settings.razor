@@ -25,16 +25,6 @@
 
         <MudDivider />
 
-        <MudText Typo="Typo.subtitle1">Properties Panel</MudText>
-        <MudSwitch T="bool" Value="@_propertiesDefaultOpen" ValueChanged="OnPropertiesDefaultOpenChanged" Color="Color.Primary">
-            Default open
-        </MudSwitch>
-        <MudSwitch T="bool" Value="@_autoCloseOnMobileEnter" ValueChanged="OnAutoCloseOnMobileEnterChanged" Color="Color.Primary">
-            Auto-close when entering mobile layout
-        </MudSwitch>
-
-        <MudDivider />
-
         <MudText Typo="Typo.subtitle1">Touch</MudText>
 
         <MudText Typo="Typo.caption">Pinch min scale</MudText>
@@ -65,8 +55,6 @@
 
 @code {
     private AppThemeMode _theme;
-    private bool _propertiesDefaultOpen;
-    private bool _autoCloseOnMobileEnter;
 
     private double _touchMinScale;
     private double _touchMaxScale;
@@ -93,8 +81,6 @@
     private void ApplyFrom(AppSettings s)
     {
         _theme = s.ThemeMode;
-        _propertiesDefaultOpen = s.PropertiesPanelDefaultOpen;
-        _autoCloseOnMobileEnter = s.AutoClosePropertiesOnMobileEnter;
 
         _touchMinScale = s.TouchMinScale;
         _touchMaxScale = s.TouchMaxScale;
@@ -108,12 +94,6 @@
 
     private Task OnThemeChanged(AppThemeMode mode)
         => SettingsService.UpdateAsync(s => s with { ThemeMode = mode });
-
-    private Task OnPropertiesDefaultOpenChanged(bool open)
-        => SettingsService.UpdateAsync(s => s with { PropertiesPanelDefaultOpen = open });
-
-    private Task OnAutoCloseOnMobileEnterChanged(bool enabled)
-        => SettingsService.UpdateAsync(s => s with { AutoClosePropertiesOnMobileEnter = enabled });
 
     private Task OnTouchMinScaleChanged(double v)
         => SettingsService.UpdateAsync(s =>

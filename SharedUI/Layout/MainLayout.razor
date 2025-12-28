@@ -38,36 +38,7 @@
                                OnClick="DownloadLogs"
                                aria-label="Download Logs" />
             </MudTooltip>
-
-            <MudTooltip Text="Properties">
-                <MudIconButton Icon="@Icons.Material.Filled.Tune"
-                               Color="Color.Inherit"
-                               Style="@ToggleIconStyle(RightOpen)"
-                               Edge="Edge.End"
-                               OnClick="ToggleRight"
-                               aria-label="Toggle Properties" />
-            </MudTooltip>
         </MudAppBar>
-
-        <MudDrawer Anchor="Anchor.Right"
-                   Elevation="1"
-                   Variant="DrawerVariant.Temporary"
-                   Open="@RightOpen"
-                   OpenChanged="OnRightOpenChanged"
-                   Width="@RightDrawerWidth"
-                   Style="@RightDrawerStyle">
-            <MudStack Spacing="2" Class="pa-3" Style="overflow:auto; max-height:100%;">
-                <MudText Typo="Typo.subtitle1">Properties</MudText>
-                @if (RightPanel is null)
-                {
-                    <MudText Typo="Typo.body2">Select a tool or filter to edit.</MudText>
-                }
-                else
-                {
-                    @RightPanel
-                }
-            </MudStack>
-        </MudDrawer>
 
         <MudMainContent>
             <MudContainer MaxWidth="MaxWidth.False" Class="pa-0" Style="padding-bottom: 96px;">
@@ -97,13 +68,7 @@
 
 @code {
     private bool _isMobile;
-    private bool _rightOpen = true;
-
     private bool _isDarkMode;
-
-    private bool _autoClosePropertiesOnMobileEnter = true;
-
-    protected RenderFragment? RightPanel { get; set; }
 
     public event Func<Task>? UndoRequested;
     public event Func<Task>? RedoRequested;
@@ -127,9 +92,6 @@
 
     private async Task ApplySettingsAsync(AppSettings s)
     {
-        _autoClosePropertiesOnMobileEnter = s.AutoClosePropertiesOnMobileEnter;
-        _rightOpen = s.PropertiesPanelDefaultOpen;
-
         if (s.ThemeMode == AppThemeMode.Light)
             _isDarkMode = false;
         else if (s.ThemeMode == AppThemeMode.Dark)
@@ -150,12 +112,6 @@
         {
             return fallback;
         }
-    }
-
-    public void SetRightPanel(RenderFragment? fragment)
-    {
-        RightPanel = fragment;
-        StateHasChanged();
     }
 
     public void SetFooterMessage(string? message) => PushFooterMessage(message);
@@ -248,35 +204,12 @@
         }
     }
 
-    private bool RightOpen => _rightOpen;
-
     private Task OnBreakpointChanged(Breakpoint breakpoint)
     {
-        var isMobile = breakpoint < Breakpoint.Md;
-        if (isMobile && !_isMobile)
-        {
-            if (_autoClosePropertiesOnMobileEnter)
-                _rightOpen = false;
-        }
-
-        _isMobile = isMobile;
+        _isMobile = breakpoint < Breakpoint.Md;
         StateHasChanged();
         return Task.CompletedTask;
     }
-
-    private void ToggleRight() => _rightOpen = !_rightOpen;
-
-    private Task OnRightOpenChanged(bool open)
-    {
-        _rightOpen = open;
-        return Task.CompletedTask;
-    }
-
-    private string RightDrawerWidth => _isMobile ? "100%" : "360px";
-    private string RightDrawerStyle
-        => _isMobile
-            ? "top:48px; height: calc(100vh - 48px - 96px);"
-            : "top:48px; height: calc(100vh - 48px - 96px);";
 
     private void GoSettings() => Nav.NavigateTo("/settings");
 
@@ -300,8 +233,6 @@
         // AppBar 배경색과 상관없이 보이도록 currentColor(=아이콘/텍스트 색) 기반 강조
         return "border:1px solid currentColor; border-radius: var(--mud-default-borderradius);";
     }
-
-    private static string? ToggleIconStyle(bool isSelected) => ThemeIconStyle(isSelected);
 
     public void Dispose()
     {
