@@ -1,5 +1,12 @@
 @inherits LayoutComponentBase
+@implements IDisposable
 @using Microsoft.AspNetCore.Components.Web
+@using Microsoft.JSInterop
+@using SharedUI.Services.Settings
+
+@inject AppSettingsService Settings
+@inject NavigationManager Nav
+@inject IJSRuntime JS
 
 <CascadingValue Value="this" IsFixed="true">
     <MudThemeProvider IsDarkMode="_isDarkMode" />
@@ -16,36 +23,39 @@
 
             <MudSpacer />
 
-            <MudStack Row="true" Spacing="0" AlignItems="AlignItems.Center">
-                <MudTooltip Text="System">
-                    <MudIconButton Icon="@Icons.Material.Filled.Settings"
-                                   Color="Color.Inherit"
-                                   Style="@ThemeIconStyle(_themeMode == ThemeMode.System)"
-                                   OnClick="@(async () => await OnThemeModeChanged(ThemeMode.System))"
-                                   aria-label="Theme: System" />
-                </MudTooltip>
-                <MudTooltip Text="Light">
-                    <MudIconButton Icon="@Icons.Material.Filled.LightMode"
-                                   Color="Color.Inherit"
-                                   Style="@ThemeIconStyle(_themeMode == ThemeMode.Light)"
-                                   OnClick="@(async () => await OnThemeModeChanged(ThemeMode.Light))"
-                                   aria-label="Theme: Light" />
-                </MudTooltip>
-                <MudTooltip Text="Dark">
-                    <MudIconButton Icon="@Icons.Material.Filled.DarkMode"
-                                   Color="Color.Inherit"
-                                   Style="@ThemeIconStyle(_themeMode == ThemeMode.Dark)"
-                                   OnClick="@(async () => await OnThemeModeChanged(ThemeMode.Dark))"
-                                   aria-label="Theme: Dark" />
-                </MudTooltip>
-            </MudStack>
+            <MudTooltip Text="Settings">
+                <MudIconButton Icon="@Icons.Material.Filled.Settings"
+                               Color="Color.Inherit"
+                               Edge="Edge.End"
+                               OnClick="GoSettings"
+                               aria-label="Open Settings" />
+            </MudTooltip>
 
-            <MudHidden Breakpoint="Breakpoint.MdAndUp">
-                <MudIconButton Icon="@Icons.Material.Filled.Tune" Color="Color.Inherit" Edge="Edge.End" OnClick="ToggleRight" />
-            </MudHidden>
+            <MudTooltip Text="Download Logs">
+                <MudIconButton Icon="@Icons.Material.Filled.Download"
+                               Color="Color.Inherit"
+                               Edge="Edge.End"
+                               OnClick="DownloadLogs"
+                               aria-label="Download Logs" />
+            </MudTooltip>
+
+            <MudTooltip Text="Properties">
+                <MudIconButton Icon="@Icons.Material.Filled.Tune"
+                               Color="Color.Inherit"
+                               Style="@ToggleIconStyle(RightOpen)"
+                               Edge="Edge.End"
+                               OnClick="ToggleRight"
+                               aria-label="Toggle Properties" />
+            </MudTooltip>
         </MudAppBar>
 
-        <MudDrawer Anchor="@RightAnchor" Elevation="1" Variant="@RightVariant" Open="@RightOpen" OpenChanged="OnRightOpenChanged" Breakpoint="Breakpoint.Md" Width="@RightDrawerWidth" Style="@RightDrawerStyle">
+        <MudDrawer Anchor="Anchor.Right"
+                   Elevation="1"
+                   Variant="DrawerVariant.Temporary"
+                   Open="@RightOpen"
+                   OpenChanged="OnRightOpenChanged"
+                   Width="@RightDrawerWidth"
+                   Style="@RightDrawerStyle">
             <MudStack Spacing="2" Class="pa-3" Style="overflow:auto; max-height:100%;">
                 <MudText Typo="Typo.subtitle1">Properties</MudText>
                 @if (RightPanel is null)
@@ -86,19 +96,12 @@
 </CascadingValue>
 
 @code {
-    public enum ThemeMode
-    {
-        System,
-        Light,
-        Dark
-    }
-
     private bool _isMobile;
     private bool _rightOpen = true;
 
-    private ThemeMode _themeMode = ThemeMode.System;
-    private bool _systemPrefersDark;
     private bool _isDarkMode;
+
+    private bool _autoClosePropertiesOnMobileEnter = true;
 
     protected RenderFragment? RightPanel { get; set; }
 
@@ -109,6 +112,45 @@
     private const int FooterPageSize = 3;
     private readonly List<string> _footerMessages = new();
     private int _footerPageOffset;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Settings.InitializeAsync();
+        await ApplySettingsAsync(Settings.Current);
+        Settings.Changed += OnSettingsChanged;
+    }
+
+    private void OnSettingsChanged(AppSettings s)
+    {
+        _ = InvokeAsync(() => ApplySettingsAsync(s));
+    }
+
+    private async Task ApplySettingsAsync(AppSettings s)
+    {
+        _autoClosePropertiesOnMobileEnter = s.AutoClosePropertiesOnMobileEnter;
+        _rightOpen = s.PropertiesPanelDefaultOpen;
+
+        if (s.ThemeMode == AppThemeMode.Light)
+            _isDarkMode = false;
+        else if (s.ThemeMode == AppThemeMode.Dark)
+            _isDarkMode = true;
+        else if (s.ThemeMode == AppThemeMode.System)
+            _isDarkMode = await TryGetSystemPrefersDarkAsync(_isDarkMode);
+
+        StateHasChanged();
+    }
+
+    private async Task<bool> TryGetSystemPrefersDarkAsync(bool fallback)
+    {
+        try
+        {
+            return await JS.InvokeAsync<bool>("mogeTheme.prefersDark");
+        }
+        catch
+        {
+            return fallback;
+        }
+    }
 
     public void SetRightPanel(RenderFragment? fragment)
     {
@@ -206,20 +248,15 @@
         }
     }
 
-    private DrawerVariant RightVariant => _isMobile ? DrawerVariant.Temporary : DrawerVariant.Persistent;
-
-    private Anchor RightAnchor => _isMobile ? Anchor.Bottom : Anchor.Right;
-    private string RightDrawerWidth => _isMobile ? "100%" : "320px";
-    private string? RightDrawerStyle => _isMobile ? "max-height: 55vh;" : null;
-
-    private bool RightOpen => _isMobile ? _rightOpen : true;
+    private bool RightOpen => _rightOpen;
 
     private Task OnBreakpointChanged(Breakpoint breakpoint)
     {
         var isMobile = breakpoint < Breakpoint.Md;
         if (isMobile && !_isMobile)
         {
-            _rightOpen = false;
+            if (_autoClosePropertiesOnMobileEnter)
+                _rightOpen = false;
         }
 
         _isMobile = isMobile;
@@ -235,25 +272,24 @@
         return Task.CompletedTask;
     }
 
-    private void OnSystemPreferenceChanged(bool prefersDark)
-    {
-        _systemPrefersDark = prefersDark;
-        if (_themeMode == ThemeMode.System)
-            _isDarkMode = prefersDark;
-    }
+    private string RightDrawerWidth => _isMobile ? "100%" : "360px";
+    private string RightDrawerStyle
+        => _isMobile
+            ? "top:48px; height: calc(100vh - 48px - 96px);"
+            : "top:48px; height: calc(100vh - 48px - 96px);";
 
-    private Task OnThemeModeChanged(ThemeMode mode)
+    private void GoSettings() => Nav.NavigateTo("/settings");
+
+    private async Task DownloadLogs()
     {
-        _themeMode = mode;
-        _isDarkMode = mode switch
+        try
         {
-            ThemeMode.System => _systemPrefersDark,
-            ThemeMode.Light => false,
-            ThemeMode.Dark => true,
-            _ => _isDarkMode
-        };
-
-        return Task.CompletedTask;
+            await JS.InvokeVoidAsync("mogeBrowserLog.downloadToday");
+        }
+        catch
+        {
+            // Best-effort.
+        }
     }
 
     private static string? ThemeIconStyle(bool isSelected)
@@ -263,5 +299,12 @@
 
         // AppBar 배경색과 상관없이 보이도록 currentColor(=아이콘/텍스트 색) 기반 강조
         return "border:1px solid currentColor; border-radius: var(--mud-default-borderradius);";
+    }
+
+    private static string? ToggleIconStyle(bool isSelected) => ThemeIconStyle(isSelected);
+
+    public void Dispose()
+    {
+        Settings.Changed -= OnSettingsChanged;
     }
 }

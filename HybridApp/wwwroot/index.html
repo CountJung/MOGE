@@ -21,10 +21,17 @@
     <div id="blazor-error-ui" data-nosnippet>
         An unhandled error has occurred.
         <a href="." class="reload">Reload</a>
+        <a href="#" class="reload" onclick="try{window.mogeBrowserLog&&window.mogeBrowserLog.downloadToday&&window.mogeBrowserLog.downloadToday();}catch(e){}; return false;">Download Logs</a>
         <span class="dismiss">🗙</span>
     </div>
 
     <script src="_content/MudBlazor/MudBlazor.min.js"></script>
+    <script src="_content/SharedUI/moge-theme.js"></script>
+    <script src="_content/SharedUI/moge-browserlog.js"></script>
+    <script>
+        window.mogeBrowserLog && window.mogeBrowserLog.configure({ platformSubfolder: 'app' });
+    </script>
+    <script src="_content/SharedUI/moge-settings.js"></script>
     <script src="_content/SharedUI/moge-canvas.js"></script>
     <script src="moge-canvas-shim.js"></script>
     <script src="_framework/blazor.webview.js" autostart="false"></script>

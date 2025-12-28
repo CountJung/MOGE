@@ -12,14 +12,17 @@
   - Raw 토큰/시그니처/캐시 인터페이스: `SharedUI/Services/Raw/*`
   - JS 정적 자산: `SharedUI/wwwroot/moge-canvas.js` (window.mogeCanvas)
   - 레이아웃/테마: `SharedUI/Layout/MainLayout.razor` (MudBlazor)
+  - 전역 설정: `SharedUI/Pages/Settings.razor` + `SharedUI/Services/Settings/*`
 - `WebApp/`: Blazor WebAssembly 호스트
   - DI 구성: `WebApp/Program.cs`
   - 브라우저 파일피커: `WebApp/Services/BrowserImageFilePicker.cs`
   - Raw RGBA LRU 캐시: `WebApp/Services/Raw/BrowserRawImageProvider.cs`
   - 부트스트랩: `WebApp/wwwroot/index.html`
+  - 설정 저장소(Web): `WebApp/Services/Settings/BrowserAppSettingsStore.cs` (localStorage via JS)
 - `HybridApp/`: MAUI Blazor Hybrid 호스트
   - DI 구성: `HybridApp/MauiProgram.cs`
   - 네이티브 파일피커: `HybridApp/Services/MauiImageFilePicker.cs`
+  - 설정 저장소(App): `HybridApp/Services/Settings/MauiAppSettingsStore.cs` (Preferences)
 
 ## 런타임별 이미지 처리 원칙 (매우 중요)
 ### 1) 브라우저(WASM)
@@ -46,6 +49,20 @@
   1) `SharedUI/wwwroot/moge-canvas.js`에 구현
   2) 필요 시 `WebApp/wwwroot/moge-canvas-shim.js`, `HybridApp/wwwroot/moge-canvas-shim.js`도 동일 시그니처로 보완
   3) Blazor에서는 `IJSRuntime` 호출부를 `SharedUI` 컴포넌트 쪽에 두는 것을 우선합니다.
+
+## 전역 설정 (Settings)
+- “테마, 패널 기본 동작, 기타 전역 UI 옵션”처럼 **앱 전체에 영향을 주는 설정은 AppBar/개별 페이지에 하드코딩하지 말고** `SharedUI/Pages/Settings.razor`에서 관리합니다.
+- 공용 도메인 모델/서비스:
+  - `SharedUI/Services/Settings/AppSettings.cs`
+  - `SharedUI/Services/Settings/AppSettingsService.cs` (변경 이벤트 `Changed` 제공)
+  - `SharedUI/Services/Settings/IAppSettingsStore.cs` (플랫폼별 저장소 추상화)
+- 플랫폼별 저장:
+  - Web: `SharedUI/wwwroot/moge-settings.js` + `WebApp/wwwroot/index.html`에서 스크립트 로드
+  - Hybrid: `HybridApp/wwwroot/index.html`에서 스크립트 로드(웹 호스트와 동일한 정적 자산 규칙 유지)
+- 앞으로 “설정이 필요한 항목”을 추가할 때는:
+  1) `AppSettings`에 필드 추가
+  2) `Settings.razor`에 UI 추가
+  3) `MainLayout.razor` 또는 관련 서비스에서 `AppSettingsService.Current`/`Changed`로 반영
 
 ## 정적 자산/부트스트랩 (WebApp)
 - WebApp은 표준 `<script src="_framework/blazor.webassembly.js"></script>` 방식으로 부팅합니다.

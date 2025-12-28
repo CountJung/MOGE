@@ -2,8 +2,10 @@
 using MudBlazor.Services;
 using HybridApp.Services;
 using HybridApp.Services.Logging;
+using HybridApp.Services.Settings;
 using SharedUI.Logging;
 using SharedUI.Services;
+using SharedUI.Services.Settings;
 
 namespace HybridApp;
 
@@ -25,6 +27,8 @@ public static class MauiProgram
 		builder.Services.AddScoped<IImageFilePicker, MauiImageFilePicker>();
 		builder.Services.AddScoped<IImageExportService, WindowsImageExportService>();
 		builder.Services.AddScoped<ImageProcessorService>();
+		builder.Services.AddScoped<IAppSettingsStore, MauiAppSettingsStore>();
+		builder.Services.AddScoped<AppSettingsService>();
 
 		builder.Services.AddSingleton(new MogeLogOptions(PlatformSubfolder: "app"));
 		builder.Services.AddSingleton<ILogFileStore, MauiLogFileStore>();

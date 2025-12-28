@@ -1,4 +1,4 @@
-# MOGE - MAUI OpenCV GIMP like Editor
+# MOGE - MAUI (Blazor) OpenCV GIMP like Editor
 
 MAUI Blazor Hybrid + Blazor WebAssembly로 동작하는 간단한 이미지 편집기(에디터) 프로젝트입니다.
 

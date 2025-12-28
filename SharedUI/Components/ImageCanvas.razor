@@ -1,6 +1,7 @@
 @using Microsoft.AspNetCore.Components.Web
 @using MudBlazor
 @using SharedUI.Services.Raw
+@using SharedUI.Services.Settings
 @implements IDisposable
 
 <MudPaper Elevation="1" Class="pa-2" Style="height: clamp(320px, 70vh, 720px);">
@@ -58,6 +59,7 @@
 @code {
     [Inject] private IJSRuntime Js { get; set; } = default!;
     [Inject] private IRawImageProvider? RawProvider { get; set; }
+    [Inject] private AppSettingsService Settings { get; set; } = default!;
 
     [Parameter] public byte[]? ImageBytes { get; set; }
     [Parameter] public string? ContentType { get; set; }
@@ -85,12 +87,63 @@
     private double _lastClientX;
     private double _lastClientY;
 
+    private readonly Dictionary<long, (double X, double Y)> _activePointers = new();
+
+    private bool _pinching;
+    private double _pinchStartDistance;
+    private double _pinchStartScale;
+    private double _pinchStartOffsetX;
+    private double _pinchStartOffsetY;
+    private double _pinchStartImageX;
+    private double _pinchStartImageY;
+    private DomRect? _panZoomRect;
+
+    private double _panVelocityX;
+    private double _panVelocityY;
+    private long _lastPanMoveTick;
+    private CancellationTokenSource? _inertiaCts;
+
+    private double _touchMinScale = 0.05;
+    private double _touchMaxScale = 20.0;
+    private double _touchPinchExponent = 1.0;
+    private bool _touchInertiaEnabled = true;
+    private double _touchInertiaStartSpeed = 0.05;
+    private double _touchInertiaStopSpeed = 0.01;
+    private double _touchInertiaDecayPer16ms = 0.92;
+
     private bool _drawing;
     private readonly List<CanvasPoint> _strokePoints = new();
     private DomRect? _strokeRect;
 
     private int? _dragHandleIndex;
     private DomRect? _cachedRect;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Settings.InitializeAsync();
+        ApplyTouchSettings(Settings.Current);
+        Settings.Changed += OnSettingsChanged;
+    }
+
+    private void OnSettingsChanged(AppSettings s)
+    {
+        ApplyTouchSettings(s);
+    }
+
+    private void ApplyTouchSettings(AppSettings s)
+    {
+        _touchMinScale = Math.Clamp(s.TouchMinScale, 0.01, 10.0);
+        _touchMaxScale = Math.Clamp(Math.Max(_touchMinScale, s.TouchMaxScale), 0.1, 50.0);
+        _touchPinchExponent = Math.Clamp(s.TouchPinchExponent, 0.5, 2.0);
+
+        _touchInertiaEnabled = s.TouchInertiaEnabled;
+        _touchInertiaStartSpeed = Math.Clamp(s.TouchInertiaStartSpeed, 0.0, 1.0);
+        _touchInertiaStopSpeed = Math.Clamp(Math.Min(s.TouchInertiaStopSpeed, _touchInertiaStartSpeed), 0.0, 1.0);
+        _touchInertiaDecayPer16ms = Math.Clamp(s.TouchInertiaDecayPer16ms, 0.80, 0.99);
+
+        if (!_touchInertiaEnabled)
+            CancelInertia();
+    }
 
     protected override async Task OnParametersSetAsync()
     {
@@ -174,13 +227,15 @@
         if (ImageBytes is null || ImageBytes.Length == 0)
             return;
 
+        CancelInertia();
+
         var rect = await Js.InvokeAsync<DomRect>("mogeCanvas.getRect", _canvas);
         var x = e.ClientX - rect.left;
         var y = e.ClientY - rect.top;
 
         var oldScale = _scale;
         var zoom = e.DeltaY < 0 ? 1.1 : 0.9;
-        var newScale = Math.Clamp(oldScale * zoom, 0.05, 20.0);
+        var newScale = Math.Clamp(oldScale * zoom, _touchMinScale, _touchMaxScale);
 
         if (Math.Abs(newScale - oldScale) < 0.0001)
             return;
@@ -196,6 +251,23 @@
     {
         if (ImageBytes is null || ImageBytes.Length == 0)
             return;
+
+        CancelInertia();
+
+        // Track active pointers for pinch zoom (touch).
+        _activePointers[e.PointerId] = (e.ClientX, e.ClientY);
+
+        if (InteractionMode == CanvasInteractionMode.PanZoom && _dragHandleIndex is null)
+        {
+            if (_activePointers.Count >= 2)
+            {
+                if (_panZoomRect is null)
+                    _panZoomRect = await Js.InvokeAsync<DomRect>("mogeCanvas.getRect", _canvas);
+
+                BeginPinch(_panZoomRect);
+                return;
+            }
+        }
 
         if (_dragHandleIndex is not null)
             return;
@@ -214,10 +286,35 @@
         _panning = true;
         _lastClientX = e.ClientX;
         _lastClientY = e.ClientY;
+
+        _panZoomRect ??= await Js.InvokeAsync<DomRect>("mogeCanvas.getRect", _canvas);
+        _lastPanMoveTick = Environment.TickCount64;
+        _panVelocityX = 0;
+        _panVelocityY = 0;
     }
 
     private async Task OnPointerMove(PointerEventArgs e)
     {
+        if (_activePointers.ContainsKey(e.PointerId))
+            _activePointers[e.PointerId] = (e.ClientX, e.ClientY);
+
+        if (_pinching)
+        {
+            if (_panZoomRect is null)
+                _panZoomRect = await Js.InvokeAsync<DomRect>("mogeCanvas.getRect", _canvas);
+
+            if (_activePointers.Count < 2)
+            {
+                _pinching = false;
+            }
+            else
+            {
+                ApplyPinch(_panZoomRect);
+                await RedrawAsync();
+                return;
+            }
+        }
+
         if (_drawing)
         {
             if (_strokeRect is null)
@@ -252,14 +349,26 @@
         _lastClientX = e.ClientX;
         _lastClientY = e.ClientY;
 
+        var nowTick = Environment.TickCount64;
+        var dt = Math.Max(1, nowTick - _lastPanMoveTick);
+        _lastPanMoveTick = nowTick;
+
+        var vx = dx / dt;
+        var vy = dy / dt;
+        const double alpha = 0.25;
+        _panVelocityX = (_panVelocityX * (1 - alpha)) + (vx * alpha);
+        _panVelocityY = (_panVelocityY * (1 - alpha)) + (vy * alpha);
+
         _offsetX += dx;
         _offsetY += dy;
 
         await RedrawAsync();
     }
 
-    private async Task OnPointerUp(PointerEventArgs _)
+    private async Task OnPointerUp(PointerEventArgs e)
     {
+        _activePointers.Remove(e.PointerId);
+
         if (_drawing)
         {
             _drawing = false;
@@ -279,12 +388,42 @@
             _panning = false;
             _dragHandleIndex = null;
             _cachedRect = null;
+            _panZoomRect = null;
+            return;
+        }
+
+        if (_pinching)
+        {
+            if (_activePointers.Count < 2)
+            {
+                _pinching = false;
+                _panZoomRect = null;
+            }
+
+            _panning = false;
+            _dragHandleIndex = null;
+            _cachedRect = null;
+            return;
+        }
+
+        if (_panning)
+        {
+            _panning = false;
+            _dragHandleIndex = null;
+            _cachedRect = null;
+
+            var speed = Math.Sqrt((_panVelocityX * _panVelocityX) + (_panVelocityY * _panVelocityY));
+            if (_touchInertiaEnabled && speed > _touchInertiaStartSpeed)
+                _ = StartInertiaAsync(_panVelocityX, _panVelocityY);
+
+            _panZoomRect = null;
             return;
         }
 
         _panning = false;
         _dragHandleIndex = null;
         _cachedRect = null;
+        _panZoomRect = null;
         await Task.CompletedTask;
     }
 
@@ -390,8 +529,116 @@
     private Task RedrawAsync()
         => Js.InvokeAsync<object>("mogeCanvas.draw", _canvas, new { scale = _scale, offsetX = _offsetX, offsetY = _offsetY }).AsTask();
 
+    private void BeginPinch(DomRect rect)
+    {
+        var pointers = _activePointers.Values.Take(2).ToArray();
+        var p1 = pointers[0];
+        var p2 = pointers[1];
+
+        var cx = ((p1.X + p2.X) * 0.5) - rect.left;
+        var cy = ((p1.Y + p2.Y) * 0.5) - rect.top;
+
+        var dx = p2.X - p1.X;
+        var dy = p2.Y - p1.Y;
+        var dist = Math.Sqrt((dx * dx) + (dy * dy));
+        if (dist < 1)
+            dist = 1;
+
+        _pinching = true;
+        _pinchStartDistance = dist;
+        _pinchStartScale = _scale;
+        _pinchStartOffsetX = _offsetX;
+        _pinchStartOffsetY = _offsetY;
+
+        _pinchStartImageX = (cx - _pinchStartOffsetX) / _pinchStartScale;
+        _pinchStartImageY = (cy - _pinchStartOffsetY) / _pinchStartScale;
+
+        _panning = false;
+        _panVelocityX = 0;
+        _panVelocityY = 0;
+    }
+
+    private void ApplyPinch(DomRect rect)
+    {
+        var pointers = _activePointers.Values.Take(2).ToArray();
+        var p1 = pointers[0];
+        var p2 = pointers[1];
+
+        var cx = ((p1.X + p2.X) * 0.5) - rect.left;
+        var cy = ((p1.Y + p2.Y) * 0.5) - rect.top;
+
+        var dx = p2.X - p1.X;
+        var dy = p2.Y - p1.Y;
+        var dist = Math.Sqrt((dx * dx) + (dy * dy));
+        if (dist < 1)
+            dist = 1;
+
+        var ratio = dist / _pinchStartDistance;
+        var adjusted = Math.Pow(ratio, _touchPinchExponent);
+        var newScale = Math.Clamp(_pinchStartScale * adjusted, _touchMinScale, _touchMaxScale);
+        if (double.IsNaN(newScale) || double.IsInfinity(newScale))
+            return;
+
+        _scale = newScale;
+        _offsetX = cx - (_pinchStartImageX * _scale);
+        _offsetY = cy - (_pinchStartImageY * _scale);
+    }
+
+    private void CancelInertia()
+    {
+        if (_inertiaCts is null)
+            return;
+
+        try { _inertiaCts.Cancel(); } catch { }
+        _inertiaCts.Dispose();
+        _inertiaCts = null;
+    }
+
+    private Task StartInertiaAsync(double velocityX, double velocityY)
+    {
+        CancelInertia();
+
+        _inertiaCts = new CancellationTokenSource();
+        var ct = _inertiaCts.Token;
+
+        return Task.Run(async () =>
+        {
+            var vx = velocityX;
+            var vy = velocityY;
+            var lastTick = Environment.TickCount64;
+
+            while (!ct.IsCancellationRequested)
+            {
+                var nowTick = Environment.TickCount64;
+                var dt = Math.Max(1, nowTick - lastTick);
+                lastTick = nowTick;
+
+                // apply velocity (px/ms)
+                var dx = vx * dt;
+                var dy = vy * dt;
+                _offsetX += dx;
+                _offsetY += dy;
+
+                // friction: decay per 16ms frame
+                var decay = Math.Pow(_touchInertiaDecayPer16ms, dt / 16.0);
+                vx *= decay;
+                vy *= decay;
+
+                var speed = Math.Sqrt((vx * vx) + (vy * vy));
+                await InvokeAsync(RedrawAsync);
+
+                if (speed < _touchInertiaStopSpeed)
+                    break;
+
+                await Task.Delay(16, ct);
+            }
+        }, ct);
+    }
+
     public void Dispose()
     {
+        CancelInertia();
+        Settings.Changed -= OnSettingsChanged;
     }
 
     private sealed class DomRect
