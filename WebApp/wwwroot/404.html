@@ -9,7 +9,8 @@
         // This script takes the current URL and converts it to a query parameter
         // that is then used by index.html to restore the state
         
-        var pathSegmentsToKeep = 1; // Change to 1 for /MOGE/ base path
+        // Keep one segment for GitHub Pages project sites: /<repo>/
+        var pathSegmentsToKeep = 1;
         
         var l = window.location;
         l.replace(

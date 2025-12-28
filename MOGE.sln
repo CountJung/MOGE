@@ -9,6 +9,15 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WebApp", "WebApp\WebApp.csp
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "HybridApp", "HybridApp\HybridApp.csproj", "{97AD9783-4E2A-4F1A-90BC-ADBDDC1F0965}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "솔루션 항목", "솔루션 항목", "{2A3A057F-5D22-31FD-628C-DF5EF75AEF1E}"
+	ProjectSection(SolutionItems) = preProject
+		blazor_project_instruction.md = blazor_project_instruction.md
+		.github\copilot-instructions.md = .github\copilot-instructions.md
+		.github\workflows\deploy-webapp.yml = .github\workflows\deploy-webapp.yml
+		DEPLOYMENT.md = DEPLOYMENT.md
+		README.md = README.md
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -58,5 +67,8 @@ Global
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {F4A7223A-8F06-45B7-AB13-8F4439AF2B73}
 	EndGlobalSection
 EndGlobal

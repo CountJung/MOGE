@@ -24,6 +24,30 @@
             }
         }(window.location))
     </script>
+
+    <!-- GitHub Pages project site support: ensure base href matches '/<repo>/' -->
+    <script>
+        (function () {
+            try {
+                var isGitHubPages = /\.github\.io$/i.test(window.location.hostname);
+                if (!isGitHubPages)
+                    return;
+
+                // For https://<user>.github.io/<repo>/...
+                var seg = window.location.pathname.split('/').filter(Boolean);
+                if (seg.length === 0)
+                    return;
+
+                var repoBase = '/' + seg[0] + '/';
+                var baseEl = document.querySelector('base');
+                if (baseEl && baseEl.getAttribute('href') !== repoBase) {
+                    baseEl.setAttribute('href', repoBase);
+                }
+            }
+            catch {
+            }
+        })();
+    </script>
 </head>
 
 <body>
@@ -50,6 +74,7 @@
         window.mogeBrowserLog && window.mogeBrowserLog.configure({ platformSubfolder: 'web' });
     </script>
     <script src="_content/SharedUI/moge-settings.js?v=20251228"></script>
+    <script src="_content/SharedUI/moge-layout.js?v=20251228"></script>
     <script src="_content/SharedUI/moge-canvas.js?v=20251220"></script>
     <script src="moge-canvas-shim.js?v=20251220"></script>
     <script src="_framework/blazor.webassembly.js"></script>

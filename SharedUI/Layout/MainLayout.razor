@@ -41,27 +41,29 @@
         </MudAppBar>
 
         <MudMainContent>
-            <MudContainer MaxWidth="MaxWidth.False" Class="pa-0" Style="padding-bottom: 96px;">
+            <MudContainer MaxWidth="MaxWidth.False" Class="pa-0" Style="padding-bottom: var(--moge-footer-height, 96px);">
                 @Body
             </MudContainer>
         </MudMainContent>
 
-        <MudPaper Square="true" Elevation="0" Class="px-3 py-2"
-                  Style="position:fixed; left:0; right:0; bottom:0; border-top:1px solid var(--mud-palette-lines-default); z-index: 1200;">
-            <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
-                <MudStack Spacing="0">
-                    @foreach (var msg in VisibleFooterMessages)
-                    {
-                        <MudText Typo="Typo.caption">@msg</MudText>
-                    }
-                </MudStack>
+        <div @ref="_footerRef" style="position:fixed; left:0; right:0; bottom:0; z-index: 1200;">
+            <MudPaper Square="true" Elevation="0" Class="px-3 py-2"
+                      Style="border-top:1px solid var(--mud-palette-lines-default);">
+                <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
+                    <MudStack Spacing="0">
+                        @foreach (var msg in VisibleFooterMessages)
+                        {
+                            <MudText Typo="Typo.caption">@msg</MudText>
+                        }
+                    </MudStack>
 
-                <MudStack Row="true" Spacing="0" AlignItems="AlignItems.Center">
-                    <MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowUp" Disabled="@(!CanScrollOlder)" OnClick="ScrollOlder" aria-label="Footer: Older messages" />
-                    <MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowDown" Disabled="@(!CanScrollNewer)" OnClick="ScrollNewer" aria-label="Footer: Newer messages" />
+                    <MudStack Row="true" Spacing="0" AlignItems="AlignItems.Center">
+                        <MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowUp" Disabled="@(!CanScrollOlder)" OnClick="ScrollOlder" aria-label="Footer: Older messages" />
+                        <MudIconButton Icon="@Icons.Material.Filled.KeyboardArrowDown" Disabled="@(!CanScrollNewer)" OnClick="ScrollNewer" aria-label="Footer: Newer messages" />
+                    </MudStack>
                 </MudStack>
-            </MudStack>
-        </MudPaper>
+            </MudPaper>
+        </div>
     </MudLayout>
     </div>
 </CascadingValue>
@@ -69,6 +71,8 @@
 @code {
     private bool _isMobile;
     private bool _isDarkMode;
+
+    private ElementReference _footerRef;
 
     public event Func<Task>? UndoRequested;
     public event Func<Task>? RedoRequested;
@@ -83,6 +87,11 @@
         await Settings.InitializeAsync();
         await ApplySettingsAsync(Settings.Current);
         Settings.Changed += OnSettingsChanged;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        await UpdateFooterHeightCssVarAsync();
     }
 
     private void OnSettingsChanged(AppSettings s)
@@ -132,6 +141,18 @@
 
         _footerPageOffset = 0;
         StateHasChanged();
+    }
+
+    private async Task UpdateFooterHeightCssVarAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("mogeLayout.setFooterHeightVar", _footerRef);
+        }
+        catch
+        {
+            // Best-effort (e.g., during prerender/early startup).
+        }
     }
 
     private IEnumerable<string> VisibleFooterMessages

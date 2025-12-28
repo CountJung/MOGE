@@ -7,7 +7,7 @@
 <MudPaper Elevation="1" Class="pa-2" Style="height: clamp(320px, 70vh, 720px);">
     <div style="position:relative; width:100%; height:100%;">
         <canvas @ref="_canvas" draggable="false" style="width:100%; height:100%; touch-action:none; display:block; user-select:none; -webkit-user-select:none; -webkit-user-drag:none;"
-            @onwheel="OnWheel"
+            @onwheel="OnWheel" @onwheel:preventDefault="true" @onwheel:stopPropagation="true"
             @onpointerdown="OnPointerDown" @onpointerdown:preventDefault="true"
             @onpointermove="OnPointerMove" @onpointermove:preventDefault="true"
             @onpointerup="OnPointerUp" @onpointerup:preventDefault="true"
@@ -215,6 +215,14 @@
     {
         if (firstRender)
         {
+            try
+            {
+                await Js.InvokeVoidAsync("mogeLayout.preventWheelScroll", _canvas);
+            }
+            catch
+            {
+            }
+
             if (CanvasReady.HasDelegate)
                 await CanvasReady.InvokeAsync(_canvas);
 
@@ -225,6 +233,9 @@
     private async Task OnWheel(WheelEventArgs e)
     {
         if (ImageBytes is null || ImageBytes.Length == 0)
+            return;
+
+        if (InteractionMode != CanvasInteractionMode.PanZoom)
             return;
 
         CancelInertia();
