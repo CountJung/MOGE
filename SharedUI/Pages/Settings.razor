@@ -1,6 +1,6 @@
 @page "/settings"
 
-@implements IDisposable
+@inherits SharedUI.Mvvm.ViewModelComponentBase<SharedUI.ViewModels.SettingsViewModel>
 
 @using SharedUI.Services.Settings
 
@@ -11,13 +11,13 @@
     <MudStack Spacing="3">
         <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
             <MudText Typo="Typo.h5">Settings</MudText>
-            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack" OnClick="GoBack">Editor</MudButton>
+            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack" OnClick="@(() => Vm!.GoBack())">Editor</MudButton>
         </MudStack>
 
         <MudDivider />
 
         <MudText Typo="Typo.subtitle1">Theme</MudText>
-        <MudRadioGroup T="AppThemeMode" Value="@_theme" ValueChanged="OnThemeChanged">
+        <MudRadioGroup T="AppThemeMode" Value="@Vm!.Theme" ValueChanged="Vm!.OnThemeChanged">
             <MudRadio T="AppThemeMode" Value="AppThemeMode.System" Label="System" />
             <MudRadio T="AppThemeMode" Value="AppThemeMode.Light" Label="Light" />
             <MudRadio T="AppThemeMode" Value="AppThemeMode.Dark" Label="Dark" />
@@ -28,118 +28,27 @@
         <MudText Typo="Typo.subtitle1">Touch</MudText>
 
         <MudText Typo="Typo.caption">Pinch min scale</MudText>
-        <MudSlider T="double" Value="@_touchMinScale" ValueChanged="OnTouchMinScaleChanged" Min="0.01" Max="5.0" Step="0.01" Color="Color.Primary" />
+        <MudSlider T="double" Value="@Vm!.TouchMinScale" ValueChanged="Vm!.OnTouchMinScaleChanged" Min="0.01" Max="5.0" Step="0.01" Color="Color.Primary" />
 
         <MudText Typo="Typo.caption">Pinch max scale</MudText>
-        <MudSlider T="double" Value="@_touchMaxScale" ValueChanged="OnTouchMaxScaleChanged" Min="0.1" Max="50.0" Step="0.1" Color="Color.Primary" />
+        <MudSlider T="double" Value="@Vm!.TouchMaxScale" ValueChanged="Vm!.OnTouchMaxScaleChanged" Min="0.1" Max="50.0" Step="0.1" Color="Color.Primary" />
 
         <MudText Typo="Typo.caption">Pinch sensitivity</MudText>
-        <MudSlider T="double" Value="@_touchPinchExponent" ValueChanged="OnTouchPinchExponentChanged" Min="0.5" Max="2.0" Step="0.05" Color="Color.Primary" />
+        <MudSlider T="double" Value="@Vm!.TouchPinchExponent" ValueChanged="Vm!.OnTouchPinchExponentChanged" Min="0.5" Max="2.0" Step="0.05" Color="Color.Primary" />
 
         <MudDivider />
 
-        <MudSwitch T="bool" Value="@_touchInertiaEnabled" ValueChanged="OnTouchInertiaEnabledChanged" Color="Color.Primary">
+        <MudSwitch T="bool" Value="@Vm!.TouchInertiaEnabled" ValueChanged="Vm!.OnTouchInertiaEnabledChanged" Color="Color.Primary">
             Inertia scroll
         </MudSwitch>
 
         <MudText Typo="Typo.caption">Inertia start speed (px/ms)</MudText>
-        <MudSlider T="double" Value="@_touchInertiaStartSpeed" ValueChanged="OnTouchInertiaStartSpeedChanged" Min="0" Max="0.5" Step="0.01" Color="Color.Primary" Disabled="@(!_touchInertiaEnabled)" />
+        <MudSlider T="double" Value="@Vm!.TouchInertiaStartSpeed" ValueChanged="Vm!.OnTouchInertiaStartSpeedChanged" Min="0" Max="0.5" Step="0.01" Color="Color.Primary" Disabled="@(!Vm!.TouchInertiaEnabled)" />
 
         <MudText Typo="Typo.caption">Inertia stop speed (px/ms)</MudText>
-        <MudSlider T="double" Value="@_touchInertiaStopSpeed" ValueChanged="OnTouchInertiaStopSpeedChanged" Min="0" Max="0.5" Step="0.005" Color="Color.Primary" Disabled="@(!_touchInertiaEnabled)" />
+        <MudSlider T="double" Value="@Vm!.TouchInertiaStopSpeed" ValueChanged="Vm!.OnTouchInertiaStopSpeedChanged" Min="0" Max="0.5" Step="0.005" Color="Color.Primary" Disabled="@(!Vm!.TouchInertiaEnabled)" />
 
         <MudText Typo="Typo.caption">Inertia decay per 16ms</MudText>
-        <MudSlider T="double" Value="@_touchInertiaDecayPer16ms" ValueChanged="OnTouchInertiaDecayChanged" Min="0.80" Max="0.99" Step="0.005" Color="Color.Primary" Disabled="@(!_touchInertiaEnabled)" />
+        <MudSlider T="double" Value="@Vm!.TouchInertiaDecayPer16ms" ValueChanged="Vm!.OnTouchInertiaDecayChanged" Min="0.80" Max="0.99" Step="0.005" Color="Color.Primary" Disabled="@(!Vm!.TouchInertiaEnabled)" />
     </MudStack>
 </MudPaper>
-
-@code {
-    private AppThemeMode _theme;
-
-    private double _touchMinScale;
-    private double _touchMaxScale;
-    private double _touchPinchExponent;
-
-    private bool _touchInertiaEnabled;
-    private double _touchInertiaStartSpeed;
-    private double _touchInertiaStopSpeed;
-    private double _touchInertiaDecayPer16ms;
-
-    protected override async Task OnInitializedAsync()
-    {
-        await SettingsService.InitializeAsync();
-        ApplyFrom(SettingsService.Current);
-        SettingsService.Changed += OnSettingsChanged;
-    }
-
-    private void OnSettingsChanged(AppSettings s)
-    {
-        ApplyFrom(s);
-        InvokeAsync(StateHasChanged);
-    }
-
-    private void ApplyFrom(AppSettings s)
-    {
-        _theme = s.ThemeMode;
-
-        _touchMinScale = s.TouchMinScale;
-        _touchMaxScale = s.TouchMaxScale;
-        _touchPinchExponent = s.TouchPinchExponent;
-
-        _touchInertiaEnabled = s.TouchInertiaEnabled;
-        _touchInertiaStartSpeed = s.TouchInertiaStartSpeed;
-        _touchInertiaStopSpeed = s.TouchInertiaStopSpeed;
-        _touchInertiaDecayPer16ms = s.TouchInertiaDecayPer16ms;
-    }
-
-    private Task OnThemeChanged(AppThemeMode mode)
-        => SettingsService.UpdateAsync(s => s with { ThemeMode = mode });
-
-    private Task OnTouchMinScaleChanged(double v)
-        => SettingsService.UpdateAsync(s =>
-        {
-            var min = Math.Clamp(v, 0.01, 10.0);
-            var max = Math.Max(min, s.TouchMaxScale);
-            return s with { TouchMinScale = min, TouchMaxScale = max };
-        });
-
-    private Task OnTouchMaxScaleChanged(double v)
-        => SettingsService.UpdateAsync(s =>
-        {
-            var max = Math.Clamp(v, 0.1, 50.0);
-            var min = Math.Min(s.TouchMinScale, max);
-            return s with { TouchMinScale = min, TouchMaxScale = max };
-        });
-
-    private Task OnTouchPinchExponentChanged(double v)
-        => SettingsService.UpdateAsync(s => s with { TouchPinchExponent = Math.Clamp(v, 0.5, 2.0) });
-
-    private Task OnTouchInertiaEnabledChanged(bool enabled)
-        => SettingsService.UpdateAsync(s => s with { TouchInertiaEnabled = enabled });
-
-    private Task OnTouchInertiaStartSpeedChanged(double v)
-        => SettingsService.UpdateAsync(s =>
-        {
-            var start = Math.Clamp(v, 0.0, 1.0);
-            var stop = Math.Min(s.TouchInertiaStopSpeed, start);
-            return s with { TouchInertiaStartSpeed = start, TouchInertiaStopSpeed = stop };
-        });
-
-    private Task OnTouchInertiaStopSpeedChanged(double v)
-        => SettingsService.UpdateAsync(s =>
-        {
-            var stop = Math.Clamp(v, 0.0, 1.0);
-            var start = Math.Max(s.TouchInertiaStartSpeed, stop);
-            return s with { TouchInertiaStartSpeed = start, TouchInertiaStopSpeed = stop };
-        });
-
-    private Task OnTouchInertiaDecayChanged(double v)
-        => SettingsService.UpdateAsync(s => s with { TouchInertiaDecayPer16ms = Math.Clamp(v, 0.80, 0.99) });
-
-    private void GoBack() => Nav.NavigateTo("/");
-
-    public void Dispose()
-    {
-        SettingsService.Changed -= OnSettingsChanged;
-    }
-}

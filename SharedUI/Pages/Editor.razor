@@ -1,6 +1,6 @@
 @page "/"
 
-@implements IDisposable
+@inherits SharedUI.Mvvm.ViewModelComponentBase<SharedUI.ViewModels.EditorViewModel>
 
 @using OpenCvSharp
 @using System.IO
@@ -13,26 +13,25 @@
 
 <MudGrid Class="pa-4" Spacing="2" Style="margin-bottom: var(--moge-footer-height, 96px);">
     <MudItem xs="12">
-        <EditorHeader HasImage="@Document.HasImage"
-                      FileName="@Document.FileName"
-                      FileSizeBytes="@(Document.Bytes?.Length ?? 0)"
-                      OpenImage="PickImagesAsync"
-                      SavePng="SavePngAsync"
-                      Clear="@(EventCallback.Factory.Create(this, Clear))" />
+        <EditorHeader HasImage="@Vm!.HasImage"
+                      FileName="@Vm!.FileName"
+                      FileSizeBytes="@Vm!.FileSizeBytes"
+                      OpenImage="Vm!.PickImagesAsync"
+                      SavePng="Vm!.SavePngAsync"
+                      Clear="Vm!.ClearAsync" />
     </MudItem>
 
     <MudItem xs="12">
-        @if (_loadedImages.Count > 0)
+        @if (Vm!.LoadedImages.Count > 0)
         {
             <MudPaper Class="pa-2" Outlined="true" Style="overflow-x:auto;">
                 <MudStack Row="true" Spacing="2" Style="flex-wrap:nowrap;">
-                    @for (var i = 0; i < _loadedImages.Count; i++)
+                    @foreach (var item in Vm!.LoadedImages)
                     {
-                        var idx = i;
-                        var item = _loadedImages[i];
-                        var isSelected = idx == _selectedLoadedIndex;
+                        var idx = item.Index;
+                        var isSelected = idx == Vm!.SelectedLoadedIndex;
 
-                        <MudPaper Class="pa-2" Elevation="0" Style="@GetLoadedImageCardStyle(isSelected)" @onclick="(() => SelectLoadedImage(idx))">
+                        <MudPaper Class="pa-2" Elevation="0" Style="@SharedUI.ViewModels.EditorViewModel.GetLoadedImageCardStyle(isSelected)" @onclick="(() => Vm!.SelectLoadedImage(idx))">
                             @if (!string.IsNullOrWhiteSpace(item.ThumbnailDataUrl))
                             {
                                 <MudImage Src="@item.ThumbnailDataUrl" Width="120" Height="120" Style="object-fit:contain;" />
@@ -42,7 +41,7 @@
                                 <MudText Typo="Typo.caption">(no preview)</MudText>
                             }
 
-                            <MudText Typo="Typo.caption" Style="max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">@item.Pick.FileName</MudText>
+                            <MudText Typo="Typo.caption" Style="max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">@item.FileName</MudText>
                         </MudPaper>
                     }
                 </MudStack>
@@ -51,972 +50,72 @@
     </MudItem>
 
     <MudItem xs="12" md="3" lg="2">
-        <EditorToolBar HasImage="@Document.HasImage"
-                       PerspectiveMode="@_perspectiveMode"
-                       CropMode="@_cropMode"
-                       InteractionMode="@_interactionMode"
-                       InteractionModeChanged="OnInteractionModeChanged"
-                       BrushRadius="@_brushRadius"
-                       BrushRadiusChanged="OnBrushRadiusChanged"
-                       SelectionMode="@_selectionMode"
-                       SelectionModeChanged="OnSelectionModeChanged"
-                       SelectionBlurKernelSize="@_selectionBlurKernelSize"
-                       SelectionBlurKernelSizeChanged="OnSelectionBlurKernelSizeChanged"
-                       SharpenAmount="@_selectionSharpenAmount"
-                       SharpenAmountChanged="OnSelectionSharpenAmountChanged"
-                       ApplySelectionBlur="ApplySelectionBlurAsync"
-                       ApplySelectionSharpen="ApplySelectionSharpenAsync" />
+        <EditorToolBar HasImage="@Vm!.HasImage"
+                       PerspectiveMode="@Vm!.PerspectiveMode"
+                       CropMode="@Vm!.CropMode"
+                       InteractionMode="@Vm!.InteractionMode"
+                       InteractionModeChanged="Vm!.OnInteractionModeChanged"
+                       BrushRadius="@Vm!.BrushRadius"
+                       BrushRadiusChanged="Vm!.OnBrushRadiusChanged"
+                       SelectionMode="@Vm!.SelectionMode"
+                       SelectionModeChanged="Vm!.OnSelectionModeChanged"
+                       SelectionBlurKernelSize="@Vm!.SelectionBlurKernelSize"
+                       SelectionBlurKernelSizeChanged="Vm!.OnSelectionBlurKernelSizeChanged"
+                       SharpenAmount="@Vm!.SelectionSharpenAmount"
+                       SharpenAmountChanged="Vm!.OnSelectionSharpenAmountChanged"
+                       ApplySelectionBlur="Vm!.ApplySelectionBlurAsync"
+                       ApplySelectionSharpen="Vm!.ApplySelectionSharpenAsync" />
     </MudItem>
 
     <MudItem xs="12" md="7" lg="8">
-        <ImageCanvas ImageBytes="@_viewBytes" ContentType="@Document.ContentType"
-                    EnableHandles="@(_perspectiveMode || _cropMode || _selectionMode)"
-                    HandlesAsRectangle="@(_cropMode || _selectionMode)"
-                    Handles="@_handles"
-                    HandlesChanged="OnHandlesChanged"
-                    InteractionMode="@((_perspectiveMode || _cropMode || _selectionMode) ? CanvasInteractionMode.PanZoom : _interactionMode)"
-                    BrushRadius="@_brushRadius"
-                    CanvasReady="OnCanvasReady"
-                    StrokeCommitted="OnStrokeCommittedAsync" />
+        <ImageCanvas ImageBytes="@Vm!.ViewBytes" ContentType="@Vm!.ContentType"
+                    EnableHandles="@(Vm!.PerspectiveMode || Vm!.CropMode || Vm!.SelectionMode)"
+                    HandlesAsRectangle="@(Vm!.CropMode || Vm!.SelectionMode)"
+                    Handles="@Vm!.Handles"
+                    HandlesChanged="Vm!.OnHandlesChanged"
+                    InteractionMode="@((Vm!.PerspectiveMode || Vm!.CropMode || Vm!.SelectionMode) ? CanvasInteractionMode.PanZoom : Vm!.InteractionMode)"
+                    BrushRadius="@Vm!.BrushRadius"
+                    CanvasReady="Vm!.OnCanvasReady"
+                    StrokeCommitted="Vm!.OnStrokeCommittedAsync" />
     </MudItem>
 
     <MudItem xs="12" md="2" lg="2">
         <MudPaper Elevation="1" Class="pa-2" Style="height: clamp(240px, 70vh, 720px); overflow:auto;">
-            @RightPanel
+            <EditorRightPanel
+                HasImage="@Vm!.HasImage"
+                PerspectiveMode="@Vm!.PerspectiveMode"
+                PerspectiveModeChanged="Vm!.OnPerspectiveModeChanged"
+                ApplyPerspective="Vm!.ApplyPerspectiveAsync"
+                CropMode="@Vm!.CropMode"
+                CropModeChanged="Vm!.OnCropModeChanged"
+                ApplyCrop="Vm!.ApplyCropAsync"
+                RotateLeft="Vm!.RotateLeftAsync"
+                RotateRight="Vm!.RotateRightAsync"
+                ResizeHalf="Vm!.ResizeHalfAsync"
+                BlurKernelSize="@Vm!.BlurKernelSize"
+                BlurKernelSizeChanged="Vm!.OnBlurChanged"
+                Grayscale="@Vm!.Grayscale"
+                GrayscaleChanged="Vm!.OnGrayscaleChanged"
+                Sepia="@Vm!.Sepia"
+                SepiaChanged="Vm!.OnSepiaChanged"
+                Canny="@Vm!.Canny"
+                CannyChanged="Vm!.OnCannyChanged"
+                CannyT1="@Vm!.CannyT1"
+                CannyT1Changed="Vm!.OnCannyT1Changed"
+                CannyT2="@Vm!.CannyT2"
+                CannyT2Changed="Vm!.OnCannyT2Changed"
+                Contrast="@Vm!.Contrast"
+                ContrastChanged="Vm!.OnContrastChanged"
+                Brightness="@Vm!.Brightness"
+                BrightnessChanged="Vm!.OnBrightnessChanged"
+                CanUndo="@Vm!.CanUndo"
+                CanRedo="@Vm!.CanRedo"
+                CurrentHistoryIndex="@Vm!.CurrentHistoryIndex"
+                Undo="Vm!.UndoAsync"
+                Redo="Vm!.RedoAsync"
+                Reset="Vm!.ResetToOriginalAsync"
+                HistoryItems="@Vm!.HistoryItems"
+                HistoryItemSelected="Vm!.GoToHistoryAsync" />
         </MudPaper>
     </MudItem>
 </MudGrid>
-
-@code {
-    [CascadingParameter] public SharedUI.Layout.MainLayout? Layout { get; set; }
-
-    private bool _layoutShortcutsSubscribed;
-
-    private byte[]? _viewBytes;
-    private ElementReference _canvas;
-    private bool _hasCanvas;
-    private const int MaxHistoryEntries = 50;
-    private sealed record HistoryEntry(byte[] Bytes, string Label, DateTime Timestamp, string? ThumbnailDataUrl);
-    private readonly List<HistoryEntry> _history = new();
-    private int _historyIndex = -1;
-
-    private bool _perspectiveMode;
-    private bool _cropMode;
-    private bool _selectionMode;
-    private List<CanvasPoint> _handles = new();
-    private int _imageWidth;
-    private int _imageHeight;
-
-    private CanvasInteractionMode _interactionMode = CanvasInteractionMode.PanZoom;
-    private int _brushRadius = 8;
-
-    private int _selectionBlurKernelSize;
-    private double _selectionSharpenAmount = 1.0;
-
-    private int _blurKernelSize;
-    private bool _grayscale;
-    private bool _sepia;
-    private bool _canny;
-    private double _cannyT1 = 50;
-    private double _cannyT2 = 150;
-    private double _contrast = 1.0;
-    private double _brightness;
-
-    private CancellationTokenSource? _debounceCts;
-    private string? _status;
-
-    private sealed record LoadedImage(ImagePickResult Pick, string? ThumbnailDataUrl);
-    private readonly List<LoadedImage> _loadedImages = new();
-    private int _selectedLoadedIndex = -1;
-
-    private byte[]? CurrentBytes
-        => _historyIndex >= 0 && _historyIndex < _history.Count
-            ? _history[_historyIndex].Bytes
-            : Document.Bytes;
-
-    private bool CanUndo => Document.HasImage && _historyIndex > 0;
-    private bool CanRedo => Document.HasImage && _historyIndex >= 0 && _historyIndex < _history.Count - 1;
-
-    protected override void OnInitialized()
-    {
-        Document.Changed += OnDocChanged;
-        SyncFromDocument();
-    }
-
-    protected override void OnAfterRender(bool firstRender)
-    {
-        if (firstRender)
-            RefreshRightPanel();
-
-        if (Layout is not null && !_layoutShortcutsSubscribed)
-        {
-            Layout.UndoRequested += OnLayoutUndoRequested;
-            Layout.RedoRequested += OnLayoutRedoRequested;
-            _layoutShortcutsSubscribed = true;
-        }
-    }
-
-    private void OnDocChanged()
-    {
-        SyncFromDocument();
-        RefreshRightPanel();
-        _ = InvokeAsync(StateHasChanged);
-    }
-
-    private void SyncFromDocument()
-    {
-        _debounceCts?.Cancel();
-        _debounceCts?.Dispose();
-        _debounceCts = null;
-
-        _perspectiveMode = false;
-        _cropMode = false;
-        _selectionMode = false;
-
-        _history.Clear();
-        _historyIndex = -1;
-
-        _blurKernelSize = 0;
-        _grayscale = false;
-        _sepia = false;
-        _canny = false;
-        _cannyT1 = 50;
-        _cannyT2 = 150;
-        _contrast = 1.0;
-        _brightness = 0;
-
-        if (Document.Bytes is { Length: > 0 } bytes)
-        {
-            var thumb = ImageProcessor.CreateThumbnailDataUrl(bytes);
-            _history.Add(new HistoryEntry(bytes, "Original", DateTime.UtcNow, thumb));
-            _historyIndex = 0;
-        }
-
-        _viewBytes = CurrentBytes;
-        _handles = new();
-        (_imageWidth, _imageHeight) = ImageProcessor.GetSize(CurrentBytes);
-        _status = null;
-    }
-
-    private async Task PickImagesAsync()
-    {
-        var picks = await ImageFilePicker.PickImagesAsync();
-        if (picks.Count == 0)
-            return;
-
-        var firstNewIndex = _loadedImages.Count;
-        foreach (var pick in picks)
-        {
-            string? thumb = null;
-            try { thumb = ImageProcessor.CreateThumbnailDataUrl(pick.Bytes); } catch { }
-            _loadedImages.Add(new LoadedImage(pick, thumb));
-        }
-
-        SelectLoadedImage(firstNewIndex);
-    }
-
-    private void Clear()
-    {
-        _selectedLoadedIndex = -1;
-        Document.Clear();
-    }
-
-    private void SelectLoadedImage(int index)
-    {
-        if (index < 0 || index >= _loadedImages.Count)
-            return;
-
-        if (_selectedLoadedIndex == index && Document.HasImage)
-            return;
-
-        _selectedLoadedIndex = index;
-        Document.Set(_loadedImages[index].Pick);
-    }
-
-    private static string GetLoadedImageCardStyle(bool isSelected)
-    {
-        var border = isSelected
-            ? "2px solid var(--mud-palette-primary)"
-            : "1px solid var(--mud-palette-lines-default)";
-
-        return $"border:{border}; border-radius: var(--mud-default-borderradius); cursor:pointer; user-select:none;";
-    }
-
-    private Task OnCanvasReady(ElementReference canvas)
-    {
-        _canvas = canvas;
-        _hasCanvas = true;
-        return Task.CompletedTask;
-    }
-
-    private async Task SavePngAsync()
-    {
-        if (!Document.HasImage)
-            return;
-
-        if (!_hasCanvas)
-            return;
-
-        var baseName = FileNameUtil.GetSafeBaseName(Document.FileName, "image");
-
-        var filename = $"{baseName}-edited.png";
-
-        await ImageExport.SavePngAsync(_canvas, filename);
-        _status = $"Saved: {filename}";
-        RefreshRightPanel();
-    }
-
-    private void RefreshRightPanel()
-    {
-        Layout?.PushFooterMessage(_status);
-    }
-
-    private RenderFragment RightPanel => @<EditorRightPanel
-        HasImage="@Document.HasImage"
-        PerspectiveMode="@_perspectiveMode"
-        PerspectiveModeChanged="OnPerspectiveModeChanged"
-        ApplyPerspective="ApplyPerspectiveAsync"
-        CropMode="@_cropMode"
-        CropModeChanged="OnCropModeChanged"
-        ApplyCrop="ApplyCropAsync"
-        RotateLeft="RotateLeftAsync"
-        RotateRight="RotateRightAsync"
-        ResizeHalf="ResizeHalfAsync"
-        BlurKernelSize="@_blurKernelSize"
-        BlurKernelSizeChanged="OnBlurChanged"
-        Grayscale="@_grayscale"
-        GrayscaleChanged="OnGrayscaleChanged"
-        Sepia="@_sepia"
-        SepiaChanged="OnSepiaChanged"
-        Canny="@_canny"
-        CannyChanged="OnCannyChanged"
-        CannyT1="@_cannyT1"
-        CannyT1Changed="OnCannyT1Changed"
-        CannyT2="@_cannyT2"
-        CannyT2Changed="OnCannyT2Changed"
-        Contrast="@_contrast"
-        ContrastChanged="OnContrastChanged"
-        Brightness="@_brightness"
-        BrightnessChanged="OnBrightnessChanged"
-        CanUndo="@CanUndo"
-        CanRedo="@CanRedo"
-        CurrentHistoryIndex="@_historyIndex"
-        Undo="UndoAsync"
-        Redo="RedoAsync"
-        Reset="ResetToOriginalAsync"
-        HistoryItems="@GetHistoryItems()"
-        HistoryItemSelected="GoToHistoryAsync"
-        />;
-
-    private IReadOnlyList<EditorHistoryListItem> GetHistoryItems()
-    {
-        if (_history.Count == 0)
-            return Array.Empty<EditorHistoryListItem>();
-
-        var items = new List<EditorHistoryListItem>(_history.Count);
-        for (var i = 0; i < _history.Count; i++)
-        {
-            items.Add(new EditorHistoryListItem(i, GetHistoryLabel(i), _history[i].ThumbnailDataUrl));
-        }
-
-        return items;
-    }
-
-    private Task OnPerspectiveModeChanged(bool enabled)
-    {
-        _perspectiveMode = enabled;
-
-        if (enabled)
-            _interactionMode = CanvasInteractionMode.PanZoom;
-
-        if (enabled)
-            _cropMode = false;
-
-        if (enabled)
-            _selectionMode = false;
-
-        if (!enabled)
-        {
-            _ = ApplyPipelineDebouncedAsync();
-            RefreshRightPanel();
-            return Task.CompletedTask;
-        }
-
-        if (!Document.HasImage)
-        {
-            _perspectiveMode = false;
-            RefreshRightPanel();
-            return Task.CompletedTask;
-        }
-
-        var baseBytes = CurrentBytes;
-        _viewBytes = baseBytes;
-
-        (_imageWidth, _imageHeight) = ImageProcessor.GetSize(baseBytes);
-        _handles = new List<CanvasPoint>
-        {
-            new(0, 0),
-            new(_imageWidth, 0),
-            new(_imageWidth, _imageHeight),
-            new(0, _imageHeight)
-        };
-
-        _status = "Perspective: editing points";
-        RefreshRightPanel();
-        StateHasChanged();
-
-        return Task.CompletedTask;
-    }
-
-    private Task OnCropModeChanged(bool enabled)
-    {
-        _cropMode = enabled;
-
-        if (enabled)
-        {
-            _perspectiveMode = false;
-            _selectionMode = false;
-            _interactionMode = CanvasInteractionMode.PanZoom;
-
-            if (!Document.HasImage)
-            {
-                _cropMode = false;
-                RefreshRightPanel();
-                return Task.CompletedTask;
-            }
-
-            var baseBytes = CurrentBytes;
-            _viewBytes = baseBytes;
-
-            (_imageWidth, _imageHeight) = ImageProcessor.GetSize(baseBytes);
-
-            var mx = Math.Max(1, (int)Math.Round(_imageWidth * 0.1));
-            var my = Math.Max(1, (int)Math.Round(_imageHeight * 0.1));
-
-            var x0 = mx;
-            var y0 = my;
-            var x1 = Math.Max(x0 + 1, _imageWidth - mx);
-            var y1 = Math.Max(y0 + 1, _imageHeight - my);
-
-            _handles = new List<CanvasPoint>
-            {
-                new(x0, y0),
-                new(x1, y0),
-                new(x1, y1),
-                new(x0, y1)
-            };
-
-            _status = "Crop: adjust corners";
-            RefreshRightPanel();
-            StateHasChanged();
-            return Task.CompletedTask;
-        }
-
-        _handles = new();
-        _status = null;
-        RefreshRightPanel();
-        StateHasChanged();
-        _ = ApplyPipelineDebouncedAsync();
-        return Task.CompletedTask;
-    }
-
-    private Task OnSelectionModeChanged(bool enabled)
-    {
-        _selectionMode = enabled;
-
-        if (enabled)
-        {
-            _perspectiveMode = false;
-            _cropMode = false;
-            _interactionMode = CanvasInteractionMode.PanZoom;
-
-            if (!Document.HasImage)
-            {
-                _selectionMode = false;
-                RefreshRightPanel();
-                return Task.CompletedTask;
-            }
-
-            var baseBytes = CurrentBytes;
-            _viewBytes = baseBytes;
-
-            (_imageWidth, _imageHeight) = ImageProcessor.GetSize(baseBytes);
-
-            var mx = Math.Max(1, (int)Math.Round(_imageWidth * 0.1));
-            var my = Math.Max(1, (int)Math.Round(_imageHeight * 0.1));
-
-            var x0 = mx;
-            var y0 = my;
-            var x1 = Math.Max(x0 + 1, _imageWidth - mx);
-            var y1 = Math.Max(y0 + 1, _imageHeight - my);
-
-            _handles = new List<CanvasPoint>
-            {
-                new(x0, y0),
-                new(x1, y0),
-                new(x1, y1),
-                new(x0, y1)
-            };
-
-            _status = "Selection: adjust corners";
-            RefreshRightPanel();
-            StateHasChanged();
-            return Task.CompletedTask;
-        }
-
-        _handles = new();
-        _status = null;
-        RefreshRightPanel();
-        StateHasChanged();
-        return Task.CompletedTask;
-    }
-
-    private Task OnInteractionModeChanged(CanvasInteractionMode mode)
-    {
-        _interactionMode = mode;
-
-        if (mode != CanvasInteractionMode.PanZoom)
-            _perspectiveMode = false;
-
-        if (mode != CanvasInteractionMode.PanZoom)
-            _cropMode = false;
-
-        if (mode != CanvasInteractionMode.PanZoom)
-            _selectionMode = false;
-
-        _status = mode == CanvasInteractionMode.PanZoom ? null : $"Tool: {mode}";
-        RefreshRightPanel();
-        StateHasChanged();
-        return Task.CompletedTask;
-    }
-
-    private Task OnBrushRadiusChanged(int radius)
-    {
-        _brushRadius = Math.Clamp(radius, 1, 64);
-        return Task.CompletedTask;
-    }
-
-    private Task OnHandlesChanged(IReadOnlyList<CanvasPoint> updated)
-    {
-        if (_cropMode || _selectionMode)
-        {
-            var xs = updated.Select(p => p.X).ToArray();
-            var ys = updated.Select(p => p.Y).ToArray();
-
-            var minX = Math.Clamp(xs.Min(), 0, _imageWidth);
-            var maxX = Math.Clamp(xs.Max(), 0, _imageWidth);
-            var minY = Math.Clamp(ys.Min(), 0, _imageHeight);
-            var maxY = Math.Clamp(ys.Max(), 0, _imageHeight);
-
-            if (maxX < minX) (minX, maxX) = (maxX, minX);
-            if (maxY < minY) (minY, maxY) = (maxY, minY);
-
-            _handles = new List<CanvasPoint>
-            {
-                new(minX, minY),
-                new(maxX, minY),
-                new(maxX, maxY),
-                new(minX, maxY)
-            };
-
-            return Task.CompletedTask;
-        }
-
-        _handles = updated.ToList();
-        return Task.CompletedTask;
-    }
-
-    private Task OnSelectionBlurKernelSizeChanged(int v)
-    {
-        _selectionBlurKernelSize = Math.Clamp(v, 0, 31);
-        return Task.CompletedTask;
-    }
-
-    private Task OnSelectionSharpenAmountChanged(double v)
-    {
-        _selectionSharpenAmount = Math.Clamp(v, 0, 3);
-        return Task.CompletedTask;
-    }
-
-    private async Task ApplySelectionBlurAsync()
-    {
-        if (!Document.HasImage || !_selectionMode)
-            return;
-
-        if (_handles.Count != 4)
-        {
-            _status = "Selection: expected 4 points";
-            RefreshRightPanel();
-            StateHasChanged();
-            return;
-        }
-
-        var (x0, y0, w, h) = GetHandlesRect();
-        var kernel = _selectionBlurKernelSize;
-        if (kernel <= 1)
-        {
-            _status = "Blur: kernel is 0";
-            RefreshRightPanel();
-            return;
-        }
-
-        _status = "Blurring selection...";
-        RefreshRightPanel();
-        StateHasChanged();
-
-        var baseBytes = CurrentBytes!;
-        byte[] next;
-        try
-        {
-            next = await Task.Run(() => ImageProcessor.BlurRegion(baseBytes, x0, y0, w, h, kernel));
-        }
-        catch (Exception ex)
-        {
-            _status = ex.Message;
-            RefreshRightPanel();
-            StateHasChanged();
-            return;
-        }
-
-        CommitHistory(next, "Blur", preserveHandles: true);
-        _status = "Blur applied";
-        RefreshRightPanel();
-        StateHasChanged();
-        await ApplyPipelineDebouncedAsync();
-    }
-
-    private async Task ApplySelectionSharpenAsync()
-    {
-        if (!Document.HasImage || !_selectionMode)
-            return;
-
-        if (_handles.Count != 4)
-        {
-            _status = "Selection: expected 4 points";
-            RefreshRightPanel();
-            StateHasChanged();
-            return;
-        }
-
-        var (x0, y0, w, h) = GetHandlesRect();
-        var amount = _selectionSharpenAmount;
-        if (amount <= 0.0001)
-        {
-            _status = "Sharpen: amount is 0";
-            RefreshRightPanel();
-            return;
-        }
-
-        _status = "Sharpening selection...";
-        RefreshRightPanel();
-        StateHasChanged();
-
-        var baseBytes = CurrentBytes!;
-        byte[] next;
-        try
-        {
-            next = await Task.Run(() => ImageProcessor.SharpenRegion(baseBytes, x0, y0, w, h, amount));
-        }
-        catch (Exception ex)
-        {
-            _status = ex.Message;
-            RefreshRightPanel();
-            StateHasChanged();
-            return;
-        }
-
-        CommitHistory(next, "Sharpen", preserveHandles: true);
-        _status = "Sharpen applied";
-        RefreshRightPanel();
-        StateHasChanged();
-        await ApplyPipelineDebouncedAsync();
-    }
-
-    private (int x, int y, int w, int h) GetHandlesRect()
-    {
-        var minX = _handles.Min(p => p.X);
-        var maxX = _handles.Max(p => p.X);
-        var minY = _handles.Min(p => p.Y);
-        var maxY = _handles.Max(p => p.Y);
-
-        var x0 = (int)Math.Floor(Math.Clamp(minX, 0, _imageWidth - 1));
-        var y0 = (int)Math.Floor(Math.Clamp(minY, 0, _imageHeight - 1));
-        var x1 = (int)Math.Ceiling(Math.Clamp(maxX, x0 + 1, _imageWidth));
-        var y1 = (int)Math.Ceiling(Math.Clamp(maxY, y0 + 1, _imageHeight));
-
-        var w = Math.Max(1, x1 - x0);
-        var h = Math.Max(1, y1 - y0);
-        return (x0, y0, w, h);
-    }
-
-    private async Task ApplyCropAsync()
-    {
-        if (!Document.HasImage)
-            return;
-
-        if (!_cropMode)
-            return;
-
-        if (_handles.Count != 4)
-        {
-            _status = "Crop: expected 4 points";
-            RefreshRightPanel();
-            StateHasChanged();
-            return;
-        }
-
-        var minX = _handles.Min(p => p.X);
-        var maxX = _handles.Max(p => p.X);
-        var minY = _handles.Min(p => p.Y);
-        var maxY = _handles.Max(p => p.Y);
-
-        var x0 = (int)Math.Floor(Math.Clamp(minX, 0, _imageWidth - 1));
-        var y0 = (int)Math.Floor(Math.Clamp(minY, 0, _imageHeight - 1));
-        var x1 = (int)Math.Ceiling(Math.Clamp(maxX, x0 + 1, _imageWidth));
-        var y1 = (int)Math.Ceiling(Math.Clamp(maxY, y0 + 1, _imageHeight));
-
-        var w = Math.Max(1, x1 - x0);
-        var h = Math.Max(1, y1 - y0);
-
-        _status = "Cropping...";
-        RefreshRightPanel();
-        StateHasChanged();
-
-        var baseBytes = CurrentBytes!;
-        byte[] cropped;
-        try
-        {
-            cropped = await Task.Run(() => ImageProcessor.Crop(baseBytes, x0, y0, w, h));
-        }
-        catch (Exception ex)
-        {
-            _status = ex.Message;
-            RefreshRightPanel();
-            StateHasChanged();
-            return;
-        }
-
-        _cropMode = false;
-        _handles = new();
-        CommitHistory(cropped, "Crop");
-
-        _status = "Crop applied";
-        RefreshRightPanel();
-        StateHasChanged();
-
-        await ApplyPipelineDebouncedAsync();
-    }
-
-    private async Task OnStrokeCommittedAsync(CanvasStroke stroke)
-    {
-        if (!Document.HasImage)
-            return;
-
-        if (_perspectiveMode)
-            return;
-
-        if (_cropMode)
-            return;
-
-        if (stroke.Points is null || stroke.Points.Count < 1)
-            return;
-
-        _status = "Drawing...";
-        RefreshRightPanel();
-        StateHasChanged();
-
-        var baseBytes = CurrentBytes!;
-        byte[] next;
-        try
-        {
-            var radius = Math.Clamp(_brushRadius, 1, 64);
-            next = await Task.Run(() => ImageProcessor.ApplyStroke(baseBytes, stroke.Mode, stroke.Points, radius));
-        }
-        catch (Exception ex)
-        {
-            _status = ex.Message;
-            RefreshRightPanel();
-            StateHasChanged();
-            return;
-        }
-
-        CommitHistory(next, stroke.Mode == CanvasInteractionMode.Eraser ? "Eraser" : "Brush");
-
-        _status = "Stroke applied";
-        RefreshRightPanel();
-        StateHasChanged();
-
-        await ApplyPipelineDebouncedAsync();
-    }
-
-    private async Task ApplyPerspectiveAsync()
-    {
-        if (!Document.HasImage)
-            return;
-
-        var src = _handles.Count == 4
-            ? _handles.Select(p => new Point2f((float)p.X, (float)p.Y)).ToArray()
-            : throw new InvalidOperationException("Expected 4 perspective points.");
-
-        var dst = new[]
-        {
-            new Point2f(0, 0),
-            new Point2f(_imageWidth, 0),
-            new Point2f(_imageWidth, _imageHeight),
-            new Point2f(0, _imageHeight)
-        };
-
-        _status = "Applying perspective...";
-        RefreshRightPanel();
-
-        var baseBytes = CurrentBytes!;
-        byte[] warped;
-        try
-        {
-            warped = await Task.Run(() => ImageProcessor.WarpPerspective(baseBytes, src, dst, _imageWidth, _imageHeight));
-        }
-        catch (Exception ex)
-        {
-            _status = ex.Message;
-            RefreshRightPanel();
-            StateHasChanged();
-            return;
-        }
-
-        _perspectiveMode = false;
-        CommitHistory(warped, "Perspective");
-
-        _status = "Perspective applied";
-        RefreshRightPanel();
-
-        await ApplyPipelineDebouncedAsync();
-    }
-
-    private async Task RotateLeftAsync()
-    {
-        await ApplyTransformAsync(bytes => ImageProcessor.Rotate90(bytes, RotateFlags.Rotate90Counterclockwise), "Rotating...", "Rotate Left");
-    }
-
-    private async Task RotateRightAsync()
-    {
-        await ApplyTransformAsync(bytes => ImageProcessor.Rotate90(bytes, RotateFlags.Rotate90Clockwise), "Rotating...", "Rotate Right");
-    }
-
-    private async Task ResizeHalfAsync()
-    {
-        await ApplyTransformAsync(bytes => ImageProcessor.ResizeByScale(bytes, 0.5), "Resizing...", "Resize 50%" );
-    }
-
-    private async Task ApplyTransformAsync(Func<byte[], byte[]> transform, string inProgressStatus, string label)
-    {
-        if (!Document.HasImage)
-            return;
-
-        _perspectiveMode = false;
-        _status = inProgressStatus;
-        RefreshRightPanel();
-        StateHasChanged();
-
-        var baseBytes = CurrentBytes!;
-        byte[] transformed;
-        try
-        {
-            transformed = await Task.Run(() => transform(baseBytes));
-        }
-        catch (Exception ex)
-        {
-            _status = ex.Message;
-            RefreshRightPanel();
-            StateHasChanged();
-            return;
-        }
-
-    CommitHistory(transformed, label);
-
-        _status = "Transform applied";
-        RefreshRightPanel();
-
-        await ApplyPipelineDebouncedAsync();
-    }
-
-    private Task OnBlurChanged(int v) { _blurKernelSize = v; return ApplyPipelineDebouncedAsync(); }
-    private Task OnGrayscaleChanged(bool v) { _grayscale = v; return ApplyPipelineDebouncedAsync(); }
-    private Task OnSepiaChanged(bool v) { _sepia = v; if (v) _grayscale = false; return ApplyPipelineDebouncedAsync(); }
-    private Task OnCannyChanged(bool v) { _canny = v; return ApplyPipelineDebouncedAsync(); }
-    private Task OnCannyT1Changed(double v) { _cannyT1 = v; return ApplyPipelineDebouncedAsync(); }
-    private Task OnCannyT2Changed(double v) { _cannyT2 = v; return ApplyPipelineDebouncedAsync(); }
-    private Task OnContrastChanged(double v) { _contrast = v; return ApplyPipelineDebouncedAsync(); }
-    private Task OnBrightnessChanged(double v) { _brightness = v; return ApplyPipelineDebouncedAsync(); }
-
-    private Task ApplyPipelineDebouncedAsync()
-    {
-        if (!Document.HasImage)
-        {
-            _viewBytes = null;
-            _status = null;
-            RefreshRightPanel();
-            StateHasChanged();
-            return Task.CompletedTask;
-        }
-
-        if (_perspectiveMode)
-            return Task.CompletedTask;
-
-        _debounceCts?.Cancel();
-        _debounceCts?.Dispose();
-        _debounceCts = new CancellationTokenSource();
-        var token = _debounceCts.Token;
-
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await Task.Delay(250, token);
-
-                var baseBytes = CurrentBytes!;
-                var settings = new ImageProcessorService.ProcessingSettings(
-                    BlurKernelSize: _blurKernelSize,
-                    Grayscale: _grayscale,
-                    Sepia: _sepia,
-                    Canny: _canny,
-                    CannyThreshold1: _cannyT1,
-                    CannyThreshold2: _cannyT2,
-                    Contrast: _contrast,
-                    Brightness: _brightness);
-
-                var processed = await Task.Run(() => ImageProcessor.ApplyPipeline(baseBytes, settings), token);
-
-                await InvokeAsync(() =>
-                {
-                    if (token.IsCancellationRequested)
-                        return;
-
-                    CommitHistory(processed, "Filters", replaceCurrentIfSameLabel: true, preserveHandles: _cropMode || _selectionMode);
-                    _status = "Updated";
-                    RefreshRightPanel();
-                    StateHasChanged();
-                });
-            }
-            catch (OperationCanceledException)
-            {
-            }
-            catch (Exception ex)
-            {
-                await InvokeAsync(() =>
-                {
-                    _status = ex.Message;
-                    RefreshRightPanel();
-                    StateHasChanged();
-                });
-            }
-        }, token);
-
-        return Task.CompletedTask;
-    }
-
-    private void CommitHistory(byte[] bytes, string label, bool replaceCurrentIfSameLabel = false, bool preserveHandles = false)
-    {
-        if (!Document.HasImage)
-            return;
-
-        // Drop redo states
-        if (_historyIndex >= 0 && _historyIndex < _history.Count - 1)
-            _history.RemoveRange(_historyIndex + 1, _history.Count - _historyIndex - 1);
-
-        var thumb = ImageProcessor.CreateThumbnailDataUrl(bytes);
-
-        if (replaceCurrentIfSameLabel && _historyIndex >= 0 && _historyIndex == _history.Count - 1 && _history[_historyIndex].Label == label)
-        {
-            _history[_historyIndex] = new HistoryEntry(bytes, label, DateTime.UtcNow, thumb);
-        }
-        else
-        {
-            _history.Add(new HistoryEntry(bytes, label, DateTime.UtcNow, thumb));
-            _historyIndex = _history.Count - 1;
-
-            if (_history.Count > MaxHistoryEntries)
-            {
-                var remove = _history.Count - MaxHistoryEntries;
-                _history.RemoveRange(0, remove);
-                _historyIndex = Math.Max(0, _historyIndex - remove);
-            }
-        }
-
-        _viewBytes = bytes;
-        (_imageWidth, _imageHeight) = ImageProcessor.GetSize(bytes);
-
-        if (!preserveHandles)
-            _handles = new();
-    }
-
-    private string GetHistoryLabel(int index)
-    {
-        if (index < 0 || index >= _history.Count)
-            return string.Empty;
-
-        return _history[index].Label;
-    }
-
-    private Task OnLayoutUndoRequested()
-    {
-        if (!CanUndo)
-            return Task.CompletedTask;
-
-        return UndoAsync();
-    }
-
-    private Task OnLayoutRedoRequested()
-    {
-        if (!CanRedo)
-            return Task.CompletedTask;
-
-        return RedoAsync();
-    }
-
-    private Task UndoAsync() => GoToHistoryAsync(_historyIndex - 1);
-    private Task RedoAsync() => GoToHistoryAsync(_historyIndex + 1);
-    private Task ResetToOriginalAsync() => GoToHistoryAsync(0);
-
-    private Task GoToHistoryAsync(int index)
-    {
-        if (!Document.HasImage)
-            return Task.CompletedTask;
-        if (index < 0 || index >= _history.Count)
-            return Task.CompletedTask;
-
-        _debounceCts?.Cancel();
-        _debounceCts?.Dispose();
-        _debounceCts = null;
-
-        _perspectiveMode = false;
-        _historyIndex = index;
-
-        var bytes = CurrentBytes;
-        _viewBytes = bytes;
-        (_imageWidth, _imageHeight) = ImageProcessor.GetSize(bytes);
-        _handles = new();
-
-        _status = "History restored";
-        RefreshRightPanel();
-        StateHasChanged();
-        return Task.CompletedTask;
-    }
-
-    public void Dispose()
-    {
-        Document.Changed -= OnDocChanged;
-
-        if (Layout is not null && _layoutShortcutsSubscribed)
-        {
-            Layout.UndoRequested -= OnLayoutUndoRequested;
-            Layout.RedoRequested -= OnLayoutRedoRequested;
-            _layoutShortcutsSubscribed = false;
-        }
-
-        _debounceCts?.Cancel();
-        _debounceCts?.Dispose();
-        _debounceCts = null;
-
-        // Properties panel is rendered within the Editor page.
-    }
-}
