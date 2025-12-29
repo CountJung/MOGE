@@ -1,4 +1,24 @@
 (function () {
+    function isTextInputFocused() {
+        try {
+            var el = document.activeElement;
+            if (!el)
+                return false;
+
+            if (el.isContentEditable)
+                return true;
+
+            var tag = (el.tagName || '').toLowerCase();
+            if (tag === 'input' || tag === 'textarea' || tag === 'select')
+                return true;
+
+            return false;
+        }
+        catch {
+            return false;
+        }
+    }
+
     function setFooterHeightVar(footerEl) {
         try {
             if (!footerEl)
@@ -41,6 +61,7 @@
     }
 
     window.mogeLayout = window.mogeLayout || {};
+    window.mogeLayout.isTextInputFocused = isTextInputFocused;
     window.mogeLayout.setFooterHeightVar = setFooterHeightVar;
     window.mogeLayout.preventWheelScroll = preventWheelScroll;
 })();

@@ -57,6 +57,10 @@
                        InteractionModeChanged="Vm!.OnInteractionModeChanged"
                        BrushRadius="@Vm!.BrushRadius"
                        BrushRadiusChanged="Vm!.OnBrushRadiusChanged"
+                       ForegroundColorHex="@Vm!.ForegroundColorHex"
+                       ForegroundColorHexChanged="Vm!.OnForegroundColorHexChanged"
+                       BackgroundColorHex="@Vm!.BackgroundColorHex"
+                       BackgroundColorHexChanged="Vm!.OnBackgroundColorHexChanged"
                        SelectionMode="@Vm!.SelectionMode"
                        SelectionModeChanged="Vm!.OnSelectionModeChanged"
                        SelectionBlurKernelSize="@Vm!.SelectionBlurKernelSize"
@@ -64,7 +68,12 @@
                        SharpenAmount="@Vm!.SelectionSharpenAmount"
                        SharpenAmountChanged="Vm!.OnSelectionSharpenAmountChanged"
                        ApplySelectionBlur="Vm!.ApplySelectionBlurAsync"
-                       ApplySelectionSharpen="Vm!.ApplySelectionSharpenAsync" />
+                       ApplySelectionSharpen="Vm!.ApplySelectionSharpenAsync"
+                       SelectSimilarColors="Vm!.SelectSimilarColorsAsync"
+                       FillSelection="Vm!.FillSelectionAsync"
+                       TextInput="@Vm!.TextInput"
+                       TextInputChanged="Vm!.OnTextInputChanged"
+                       ApplyText="Vm!.ApplyTextAsync" />
     </MudItem>
 
     <MudItem xs="12" md="7" lg="8">

@@ -5,29 +5,69 @@
     <MudStack Spacing="2">
         <MudText Typo="Typo.subtitle2">Tools</MudText>
 
-        <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
-            <MudTooltip Text="Pan/Zoom">
-                <MudIconButton Icon="@Icons.Material.Filled.PanTool" Color="@(IsPanZoom ? Color.Primary : Color.Inherit)"
-                               Disabled="@ToolDisabled" OnClick="SelectPanZoom" aria-label="Tool: Pan/Zoom" />
-            </MudTooltip>
-            <MudTooltip Text="Brush">
-                <MudIconButton Icon="@Icons.Material.Filled.Brush" Color="@(IsBrush ? Color.Primary : Color.Inherit)"
-                               Disabled="@ToolDisabled" OnClick="SelectBrush" aria-label="Tool: Brush" />
-            </MudTooltip>
-            <MudTooltip Text="Eraser">
-                <MudIconButton Icon="@Icons.Material.Filled.AutoFixOff" Color="@(IsEraser ? Color.Primary : Color.Inherit)"
-                               Disabled="@ToolDisabled" OnClick="SelectEraser" aria-label="Tool: Eraser" />
-            </MudTooltip>
-            <MudTooltip Text="Selection (rectangle)">
-                <MudIconButton Icon="@Icons.Material.Filled.SelectAll" Color="@(IsSelection ? Color.Primary : Color.Inherit)"
-                               Disabled="@ToolDisabled" OnClick="SelectSelection" aria-label="Tool: Selection" />
-            </MudTooltip>
+        <MudStack Spacing="1">
+            <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Style="flex-wrap:wrap;">
+                <MudTooltip Text="Pan/Zoom">
+                    <MudIconButton Icon="@Icons.Material.Filled.PanTool" Color="@(IsPanZoom ? Color.Primary : Color.Inherit)"
+                                   Disabled="@ToolDisabled" OnClick="SelectPanZoom" aria-label="Tool: Pan/Zoom" />
+                </MudTooltip>
+                <MudTooltip Text="Selection (rectangle)">
+                    <MudIconButton Icon="@Icons.Material.Filled.SelectAll" Color="@(IsSelection ? Color.Primary : Color.Inherit)"
+                                   Disabled="@ToolDisabled" OnClick="SelectSelection" aria-label="Tool: Selection" />
+                </MudTooltip>
+                <MudTooltip Text="Brush">
+                    <MudIconButton Icon="@Icons.Material.Filled.Brush" Color="@(IsBrush ? Color.Primary : Color.Inherit)"
+                                   Disabled="@ToolDisabled" OnClick="SelectBrush" aria-label="Tool: Brush" />
+                </MudTooltip>
+                <MudTooltip Text="Eraser">
+                    <MudIconButton Icon="@Icons.Material.Filled.AutoFixOff" Color="@(IsEraser ? Color.Primary : Color.Inherit)"
+                                   Disabled="@ToolDisabled" OnClick="SelectEraser" aria-label="Tool: Eraser" />
+                </MudTooltip>
+            </MudStack>
+
+            <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Style="flex-wrap:wrap;">
+                <MudTooltip Text="Select similar colors (within selection rectangle)">
+                    <MudIconButton Icon="@Icons.Material.Filled.Colorize" Disabled="@(!HasImage || !SelectionMode)"
+                                   OnClick="@(async () => await SelectSimilarColors.InvokeAsync())" aria-label="Select similar colors" />
+                </MudTooltip>
+                <MudTooltip Text="Fill selection with FG">
+                    <MudIconButton Icon="@Icons.Material.Filled.FormatColorFill" Disabled="@(!HasImage || !SelectionMode)"
+                                   OnClick="@(async () => await FillSelection.InvokeAsync())" aria-label="Fill selection" />
+                </MudTooltip>
+                <MudTooltip Text="Apply text (placed inside selection rectangle)">
+                    <MudIconButton Icon="@Icons.Material.Filled.TextFields" Disabled="@(!HasImage || !SelectionMode || string.IsNullOrWhiteSpace(TextInput))"
+                                   OnClick="@(async () => await ApplyText.InvokeAsync())" aria-label="Apply text" />
+                </MudTooltip>
+                <MudTooltip Text="Apply blur to selection">
+                    <MudIconButton Icon="@Icons.Material.Filled.BlurOn" Disabled="@(!HasImage || !SelectionMode)"
+                                   OnClick="@(async () => await ApplySelectionBlur.InvokeAsync())" aria-label="Apply blur to selection" />
+                </MudTooltip>
+                <MudTooltip Text="Apply sharpen to selection">
+                    <MudIconButton Icon="@Icons.Material.Filled.AutoFixHigh" Disabled="@(!HasImage || !SelectionMode)"
+                                   OnClick="@(async () => await ApplySelectionSharpen.InvokeAsync())" aria-label="Apply sharpen to selection" />
+                </MudTooltip>
+            </MudStack>
         </MudStack>
 
         @if (!IsPanZoom && !IsSelection)
         {
+            <MudDivider />
+            <MudText Typo="Typo.subtitle2">Brush / Eraser</MudText>
+
             <MudText Typo="Typo.caption">Brush Size</MudText>
             <MudSlider T="int" Value="@BrushRadius" ValueChanged="BrushRadiusChanged" Min="1" Max="64" Step="1" Color="Color.Primary" Disabled="@(!HasImage || PerspectiveMode || CropMode)" />
+
+            <MudText Typo="Typo.caption">Colors</MudText>
+            <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Style="flex-wrap:wrap;">
+                <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                    <MudText Typo="Typo.caption">FG</MudText>
+                    <input type="color" value="@ForegroundColorHex" disabled="@(!HasImage)" style="height:32px; width:40px; padding:0; border:1px solid var(--mud-palette-lines-default); border-radius: var(--mud-default-borderradius); background:transparent;" @onchange="OnForegroundColorInput" />
+                </MudStack>
+                <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                    <MudText Typo="Typo.caption">BG</MudText>
+                    <input type="color" value="@BackgroundColorHex" disabled="@(!HasImage)" style="height:32px; width:40px; padding:0; border:1px solid var(--mud-palette-lines-default); border-radius: var(--mud-default-borderradius); background:transparent;" @onchange="OnBackgroundColorInput" />
+                </MudStack>
+            </MudStack>
         }
 
         @if (PerspectiveMode)
@@ -44,6 +84,7 @@
         <MudText Typo="Typo.subtitle2">Selection</MudText>
 
         <MudText Typo="Typo.caption">Use the Selection tool to set the area.</MudText>
+        <MudText Typo="Typo.caption">Uses FG as the target/fill/text color.</MudText>
 
         <MudText Typo="Typo.caption">Blur (selected area)</MudText>
         <MudSlider T="int" Value="@SelectionBlurKernelSize" ValueChanged="SelectionBlurKernelSizeChanged" Min="0" Max="31" Step="1" Color="Color.Primary"
@@ -53,15 +94,7 @@
         <MudSlider T="double" Value="@SharpenAmount" ValueChanged="SharpenAmountChanged" Min="0" Max="3" Step="0.1" Color="Color.Primary"
                    Disabled="@(!HasImage || !SelectionMode)" />
 
-        <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
-            <MudTooltip Text="Apply blur to selection">
-                <MudIconButton Icon="@Icons.Material.Filled.BlurOn" Disabled="@(!HasImage || !SelectionMode)"
-                               OnClick="@(async () => await ApplySelectionBlur.InvokeAsync())" aria-label="Apply blur to selection" />
-            </MudTooltip>
-            <MudTooltip Text="Apply sharpen to selection">
-                <MudIconButton Icon="@Icons.Material.Filled.AutoFixHigh" Disabled="@(!HasImage || !SelectionMode)"
-                               OnClick="@(async () => await ApplySelectionSharpen.InvokeAsync())" aria-label="Apply sharpen to selection" />
-            </MudTooltip>
-        </MudStack>
+        <MudText Typo="Typo.caption">Text</MudText>
+        <MudTextField T="string" Value="@TextInput" ValueChanged="TextInputChanged" Placeholder="Text" Disabled="@(!HasImage)" Immediate="true" />
     </MudStack>
 </MudPaper>

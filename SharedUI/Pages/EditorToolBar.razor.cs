@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Components;
 using SharedUI.Components;
+using Microsoft.AspNetCore.Components.Web;
 
 namespace SharedUI.Pages;
 
@@ -26,6 +27,19 @@ public partial class EditorToolBar
 
     [Parameter] public EventCallback ApplySelectionBlur { get; set; }
     [Parameter] public EventCallback ApplySelectionSharpen { get; set; }
+
+    [Parameter] public string ForegroundColorHex { get; set; } = "#000000";
+    [Parameter] public EventCallback<string> ForegroundColorHexChanged { get; set; }
+
+    [Parameter] public string BackgroundColorHex { get; set; } = "#ffffff";
+    [Parameter] public EventCallback<string> BackgroundColorHexChanged { get; set; }
+
+    [Parameter] public EventCallback SelectSimilarColors { get; set; }
+    [Parameter] public EventCallback FillSelection { get; set; }
+
+    [Parameter] public string TextInput { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> TextInputChanged { get; set; }
+    [Parameter] public EventCallback ApplyText { get; set; }
 
     private bool ToolDisabled => !HasImage || PerspectiveMode || CropMode;
 
@@ -73,5 +87,23 @@ public partial class EditorToolBar
             return;
 
         await SelectionModeChanged.InvokeAsync(true);
+    }
+
+    private Task OnForegroundColorInput(ChangeEventArgs e)
+    {
+        var v = e.Value?.ToString();
+        if (string.IsNullOrWhiteSpace(v))
+            return Task.CompletedTask;
+
+        return ForegroundColorHexChanged.InvokeAsync(v);
+    }
+
+    private Task OnBackgroundColorInput(ChangeEventArgs e)
+    {
+        var v = e.Value?.ToString();
+        if (string.IsNullOrWhiteSpace(v))
+            return Task.CompletedTask;
+
+        return BackgroundColorHexChanged.InvokeAsync(v);
     }
 }

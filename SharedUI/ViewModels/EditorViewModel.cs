@@ -36,6 +36,11 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
     private CanvasInteractionMode _interactionMode = CanvasInteractionMode.PanZoom;
     private int _brushRadius = 8;
 
+    private string _foregroundColorHex = "#000000";
+    private string _backgroundColorHex = "#ffffff";
+    private string _textInput = string.Empty;
+    private byte[]? _selectionMask;
+
     private int _selectionBlurKernelSize;
     private double _selectionSharpenAmount = 1.0;
 
@@ -82,6 +87,11 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
 
     public CanvasInteractionMode InteractionMode => _interactionMode;
     public int BrushRadius => _brushRadius;
+
+    public string ForegroundColorHex => _foregroundColorHex;
+    public string BackgroundColorHex => _backgroundColorHex;
+
+    public string TextInput => _textInput;
 
     public IReadOnlyList<CanvasPoint> Handles => _handles;
 
@@ -176,6 +186,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
 
         _viewBytes = CurrentBytes;
         _handles = new();
+        _selectionMask = null;
         (_imageWidth, _imageHeight) = _imageProcessor.GetSize(CurrentBytes);
         _status = null;
     }
@@ -370,6 +381,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
     public Task OnSelectionModeChanged(bool enabled)
     {
         _selectionMode = enabled;
+        _selectionMask = null;
 
         if (enabled)
         {
@@ -432,6 +444,9 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         if (mode != CanvasInteractionMode.PanZoom)
             _selectionMode = false;
 
+        if (mode != CanvasInteractionMode.PanZoom)
+            _selectionMask = null;
+
         _status = mode == CanvasInteractionMode.PanZoom ? null : $"Tool: {mode}";
         RefreshFooter();
         NotifyAll();
@@ -449,32 +464,208 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
     {
         if (_cropMode || _selectionMode)
         {
-            var xs = updated.Select(p => p.X).ToArray();
-            var ys = updated.Select(p => p.Y).ToArray();
+            // Keep handle ordering stable (TL/TR/BR/BL) during dragging.
+            // Normalizing to min/max each move can swap indices, which makes the active drag handle
+            // "jump" and feels like the rectangle stops shrinking.
+            _handles = updated
+                .Select(p => new CanvasPoint(
+                    Math.Clamp(p.X, 0, _imageWidth),
+                    Math.Clamp(p.Y, 0, _imageHeight)))
+                .ToList();
 
-            var minX = Math.Clamp(xs.Min(), 0, _imageWidth);
-            var maxX = Math.Clamp(xs.Max(), 0, _imageWidth);
-            var minY = Math.Clamp(ys.Min(), 0, _imageHeight);
-            var maxY = Math.Clamp(ys.Max(), 0, _imageHeight);
-
-            if (maxX < minX) (minX, maxX) = (maxX, minX);
-            if (maxY < minY) (minY, maxY) = (maxY, minY);
-
-            _handles = new List<CanvasPoint>
-            {
-                new(minX, minY),
-                new(maxX, minY),
-                new(maxX, maxY),
-                new(minX, maxY)
-            };
+            _selectionMask = null;
 
             NotifyAll();
             return Task.CompletedTask;
         }
 
         _handles = updated.ToList();
+        _selectionMask = null;
         NotifyAll();
         return Task.CompletedTask;
+    }
+
+    public Task OnForegroundColorHexChanged(string hex)
+    {
+        _foregroundColorHex = NormalizeHexColor(hex, "#000000");
+        NotifyAll();
+        return Task.CompletedTask;
+    }
+
+    public Task OnBackgroundColorHexChanged(string hex)
+    {
+        _backgroundColorHex = NormalizeHexColor(hex, "#ffffff");
+        NotifyAll();
+        return Task.CompletedTask;
+    }
+
+    public Task OnTextInputChanged(string text)
+    {
+        _textInput = text ?? string.Empty;
+        NotifyAll();
+        return Task.CompletedTask;
+    }
+
+    public Task SelectSimilarColorsAsync()
+    {
+        if (!HasImage || !_selectionMode)
+            return Task.CompletedTask;
+
+        if (_handles.Count != 4)
+        {
+            _status = "Selection: expected 4 points";
+            RefreshFooter();
+            NotifyAll();
+            return Task.CompletedTask;
+        }
+
+        var (x0, y0, w, h) = GetHandlesRect();
+        var target = Rgba32.FromHexOrDefault(_foregroundColorHex, new Rgba32(0, 0, 0, 255));
+
+        _status = "Selecting similar colors...";
+        RefreshFooter();
+        NotifyAll();
+
+        try
+        {
+            // Fixed tolerance for MVP.
+            _selectionMask = _imageProcessor.CreateSimilarColorMask(CurrentBytes!, x0, y0, w, h, target, tolerance: 30);
+            _status = "Similar colors selected";
+        }
+        catch (Exception ex)
+        {
+            _status = ex.Message;
+        }
+
+        RefreshFooter();
+        NotifyAll();
+        return Task.CompletedTask;
+    }
+
+    public async Task FillSelectionAsync()
+    {
+        if (!HasImage || !_selectionMode)
+            return;
+
+        if (_handles.Count != 4)
+        {
+            _status = "Selection: expected 4 points";
+            RefreshFooter();
+            NotifyAll();
+            return;
+        }
+
+        var (x0, y0, w, h) = GetHandlesRect();
+        var fill = Rgba32.FromHexOrDefault(_foregroundColorHex, new Rgba32(0, 0, 0, 255));
+
+        var mask = _selectionMask;
+        if (mask is null)
+        {
+            // Fill the whole selection rectangle.
+            mask = new byte[_imageWidth * _imageHeight];
+            for (var yy = y0; yy < y0 + h; yy++)
+            {
+                var row = yy * _imageWidth;
+                for (var xx = x0; xx < x0 + w; xx++)
+                    mask[row + xx] = 255;
+            }
+        }
+
+        _status = "Filling selection...";
+        RefreshFooter();
+        NotifyAll();
+
+        var baseBytes = CurrentBytes!;
+        byte[] next;
+        try
+        {
+            next = await Task.Run(() => _imageProcessor.FillByMask(baseBytes, mask, fill));
+        }
+        catch (Exception ex)
+        {
+            _status = ex.Message;
+            RefreshFooter();
+            NotifyAll();
+            return;
+        }
+
+        CommitHistory(next, "Fill", preserveHandles: true);
+        _status = "Fill applied";
+        RefreshFooter();
+        NotifyAll();
+        await ApplyPipelineDebouncedAsync();
+    }
+
+    public async Task ApplyTextAsync()
+    {
+        if (!HasImage || !_selectionMode)
+            return;
+
+        if (_handles.Count != 4)
+        {
+            _status = "Selection: expected 4 points";
+            RefreshFooter();
+            NotifyAll();
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_textInput))
+            return;
+
+        var (x0, y0, w, h) = GetHandlesRect();
+        var color = Rgba32.FromHexOrDefault(_foregroundColorHex, new Rgba32(0, 0, 0, 255));
+
+        // Place text near the top-left inside the selection rectangle.
+        var tx = Math.Clamp(x0 + 4, 0, Math.Max(0, _imageWidth - 1));
+        var ty = Math.Clamp(y0 + Math.Min(24, Math.Max(12, h - 4)), 0, Math.Max(0, _imageHeight - 1));
+
+        _status = "Applying text...";
+        RefreshFooter();
+        NotifyAll();
+
+        var baseBytes = CurrentBytes!;
+        byte[] next;
+        try
+        {
+            next = await Task.Run(() => _imageProcessor.DrawText(baseBytes, _textInput, tx, ty, color));
+        }
+        catch (Exception ex)
+        {
+            _status = ex.Message;
+            RefreshFooter();
+            NotifyAll();
+            return;
+        }
+
+        CommitHistory(next, "Text", preserveHandles: true);
+        _status = "Text applied";
+        RefreshFooter();
+        NotifyAll();
+        await ApplyPipelineDebouncedAsync();
+    }
+
+    private static string NormalizeHexColor(string? hex, string fallback)
+    {
+        if (string.IsNullOrWhiteSpace(hex))
+            return fallback;
+
+        var s = hex.Trim();
+        if (!s.StartsWith('#'))
+            s = "#" + s;
+
+        if (s.Length != 7)
+            return fallback;
+
+        // basic validation
+        for (var i = 1; i < 7; i++)
+        {
+            var c = s[i];
+            var ok = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+            if (!ok)
+                return fallback;
+        }
+
+        return s;
     }
 
     public Task OnSelectionBlurKernelSizeChanged(int v)
@@ -685,7 +876,11 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         try
         {
             var radius = Math.Clamp(_brushRadius, 1, 64);
-            next = await Task.Run(() => _imageProcessor.ApplyStroke(baseBytes, stroke.Mode, stroke.Points, radius));
+            var color = stroke.Mode == CanvasInteractionMode.Eraser
+                ? Rgba32.FromHexOrDefault(_backgroundColorHex, new Rgba32(255, 255, 255, 255))
+                : Rgba32.FromHexOrDefault(_foregroundColorHex, new Rgba32(0, 0, 0, 255));
+
+            next = await Task.Run(() => _imageProcessor.ApplyStroke(baseBytes, stroke.Mode, stroke.Points, radius, color));
         }
         catch (Exception ex)
         {

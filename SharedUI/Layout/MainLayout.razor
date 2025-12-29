@@ -16,7 +16,7 @@
 
     <MudBreakpointProvider OnBreakpointChanged="OnBreakpointChanged" />
 
-    <div tabindex="0" style="outline:none;" @onkeydown="OnKeyDown" @onkeydown:preventDefault="true">
+    <div tabindex="0" style="outline:none;" @onkeydown="OnKeyDownAsync">
     <MudLayout>
         <MudAppBar Dense="true">
             <MudText Typo="Typo.h6">MOGE</MudText>
@@ -192,8 +192,18 @@
         StateHasChanged();
     }
 
-    private void OnKeyDown(KeyboardEventArgs e)
+    private async Task OnKeyDownAsync(KeyboardEventArgs e)
     {
+        try
+        {
+            if (await JS.InvokeAsync<bool>("mogeLayout.isTextInputFocused"))
+                return;
+        }
+        catch
+        {
+            // Best-effort. If JS is unavailable, fall back to handling shortcuts.
+        }
+
         if ((e.CtrlKey || e.MetaKey) && string.Equals(e.Key, "z", StringComparison.OrdinalIgnoreCase))
         {
             // Common editor shortcuts: Ctrl+Z = Undo, Ctrl+Shift+Z = Redo

@@ -543,7 +543,7 @@ public sealed class ImageProcessorService
         return EncodeForDisplay(croppedMat);
     }
 
-    public byte[] ApplyStroke(byte[] imageBytes, CanvasInteractionMode mode, IReadOnlyList<CanvasPoint> points, int radius)
+    public byte[] ApplyStroke(byte[] imageBytes, CanvasInteractionMode mode, IReadOnlyList<CanvasPoint> points, int radius, Rgba32? color = null)
     {
         if (points is null)
             throw new ArgumentNullException(nameof(points));
@@ -555,7 +555,7 @@ public sealed class ImageProcessorService
         if (OperatingSystem.IsBrowser())
         {
             var raw = GetRawOrThrow(imageBytes);
-            var next = ApplyStrokeToRgba(raw, mode, points, radius);
+            var next = ApplyStrokeToRgba(raw, mode, points, radius, color);
             return ReturnToken(next);
         }
 
@@ -568,7 +568,11 @@ public sealed class ImageProcessorService
         var thickness = Math.Max(1, radius * 2);
 
         var isEraser = mode == CanvasInteractionMode.Eraser;
-        var brushColor = new Scalar(255, 255, 255); // BGR: white
+        var hasColor = color is not null;
+
+        // Default behavior (back-compat): brush paints white, eraser makes transparent.
+        var c = color ?? new Rgba32(255, 255, 255, 255);
+        var bgr = new Scalar(c.B, c.G, c.R);
         var alphaBrush = new Scalar(255);
         var alphaErase = new Scalar(0);
 
@@ -582,15 +586,24 @@ public sealed class ImageProcessorService
 
             if (isEraser)
             {
-                // Make transparent.
-                Cv2.Line(alpha, p1, p2, alphaErase, thickness, LineTypes.AntiAlias);
-                // Also clear color to avoid fringes when composited elsewhere.
-                Cv2.Line(work, p1, p2, Scalar.All(0), thickness, LineTypes.AntiAlias);
+                if (!hasColor)
+                {
+                    // Default eraser: make transparent.
+                    Cv2.Line(alpha, p1, p2, alphaErase, thickness, LineTypes.AntiAlias);
+                    // Also clear color to avoid fringes when composited elsewhere.
+                    Cv2.Line(work, p1, p2, Scalar.All(0), thickness, LineTypes.AntiAlias);
+                }
+                else
+                {
+                    // GIMP-like BG erase: paint with provided color (opaque).
+                    Cv2.Line(work, p1, p2, bgr, thickness, LineTypes.AntiAlias);
+                    Cv2.Line(alpha, p1, p2, alphaBrush, thickness, LineTypes.AntiAlias);
+                }
             }
             else
             {
-                // Paint opaque white.
-                Cv2.Line(work, p1, p2, brushColor, thickness, LineTypes.AntiAlias);
+                // Paint opaque with color.
+                Cv2.Line(work, p1, p2, bgr, thickness, LineTypes.AntiAlias);
                 Cv2.Line(alpha, p1, p2, alphaBrush, thickness, LineTypes.AntiAlias);
             }
         }
@@ -599,7 +612,7 @@ public sealed class ImageProcessorService
         return EncodeForDisplay(merged);
     }
 
-    private static RawRgbaImage ApplyStrokeToRgba(RawRgbaImage src, CanvasInteractionMode mode, IReadOnlyList<CanvasPoint> points, int radius)
+    private static RawRgbaImage ApplyStrokeToRgba(RawRgbaImage src, CanvasInteractionMode mode, IReadOnlyList<CanvasPoint> points, int radius, Rgba32? color)
     {
         if (src.Width <= 0 || src.Height <= 0)
             return src;
@@ -609,18 +622,20 @@ public sealed class ImageProcessorService
 
         var dst = src.RgbaBytes.ToArray();
         var isEraser = mode == CanvasInteractionMode.Eraser;
+        var hasColor = color is not null;
+        var c = color ?? new Rgba32(255, 255, 255, 255);
 
         for (var i = 1; i < points.Count; i++)
         {
             var a = points[i - 1];
             var b = points[i];
-            DrawSegment(dst, src.Width, src.Height, a, b, radius, isEraser);
+            DrawSegment(dst, src.Width, src.Height, a, b, radius, isEraser, hasColor, c);
         }
 
         return new RawRgbaImage(src.Width, src.Height, dst);
     }
 
-    private static void DrawSegment(byte[] rgba, int width, int height, CanvasPoint a, CanvasPoint b, int radius, bool erase)
+    private static void DrawSegment(byte[] rgba, int width, int height, CanvasPoint a, CanvasPoint b, int radius, bool erase, bool hasColor, Rgba32 color)
     {
         var dx = b.X - a.X;
         var dy = b.Y - a.Y;
@@ -633,11 +648,11 @@ public sealed class ImageProcessorService
             var t = s / (double)steps;
             var x = (int)Math.Round(a.X + dx * t);
             var y = (int)Math.Round(a.Y + dy * t);
-            DrawFilledCircle(rgba, width, height, x, y, radius, erase);
+            DrawFilledCircle(rgba, width, height, x, y, radius, erase, hasColor, color);
         }
     }
 
-    private static void DrawFilledCircle(byte[] rgba, int width, int height, int cx, int cy, int radius, bool erase)
+    private static void DrawFilledCircle(byte[] rgba, int width, int height, int cx, int cy, int radius, bool erase, bool hasColor, Rgba32 color)
     {
         if (radius <= 0)
             return;
@@ -660,22 +675,331 @@ public sealed class ImageProcessorService
                 var idx = (row + x) * 4;
                 if (erase)
                 {
-                    // Eraser: make pixels transparent.
-                    rgba[idx + 0] = 0;
-                    rgba[idx + 1] = 0;
-                    rgba[idx + 2] = 0;
-                    rgba[idx + 3] = 0;
+                    if (!hasColor)
+                    {
+                        // Default eraser: make pixels transparent.
+                        rgba[idx + 0] = 0;
+                        rgba[idx + 1] = 0;
+                        rgba[idx + 2] = 0;
+                        rgba[idx + 3] = 0;
+                    }
+                    else
+                    {
+                        // GIMP-like BG erase: paint with provided color.
+                        rgba[idx + 0] = color.R;
+                        rgba[idx + 1] = color.G;
+                        rgba[idx + 2] = color.B;
+                        rgba[idx + 3] = 255;
+                    }
                 }
                 else
                 {
-                    // Brush: paint white.
-                    rgba[idx + 0] = 255;
-                    rgba[idx + 1] = 255;
-                    rgba[idx + 2] = 255;
+                    rgba[idx + 0] = color.R;
+                    rgba[idx + 1] = color.G;
+                    rgba[idx + 2] = color.B;
                     rgba[idx + 3] = 255;
                 }
             }
         }
+    }
+
+    public byte[] CreateSimilarColorMask(byte[] imageBytes, int x, int y, int width, int height, Rgba32 target, int tolerance)
+    {
+        tolerance = Math.Clamp(tolerance, 0, 255);
+
+        var (iw, ih) = GetSize(imageBytes);
+        if (iw <= 0 || ih <= 0)
+            throw new InvalidOperationException("Image size is unknown.");
+
+        x = Math.Clamp(x, 0, iw - 1);
+        y = Math.Clamp(y, 0, ih - 1);
+        width = Math.Clamp(width, 1, iw - x);
+        height = Math.Clamp(height, 1, ih - y);
+
+        if (OperatingSystem.IsBrowser())
+        {
+            var raw = GetRawOrThrow(imageBytes);
+            var mask = new byte[iw * ih];
+
+            var r0 = Math.Max(0, target.R - tolerance);
+            var r1 = Math.Min(255, target.R + tolerance);
+            var g0 = Math.Max(0, target.G - tolerance);
+            var g1 = Math.Min(255, target.G + tolerance);
+            var b0 = Math.Max(0, target.B - tolerance);
+            var b1 = Math.Min(255, target.B + tolerance);
+
+            for (var yy = y; yy < y + height; yy++)
+            {
+                var rowBase = yy * iw;
+                var pxBase = rowBase * 4;
+                for (var xx = x; xx < x + width; xx++)
+                {
+                    var p = pxBase + (xx * 4);
+                    var rr = raw.RgbaBytes[p + 0];
+                    var gg = raw.RgbaBytes[p + 1];
+                    var bb = raw.RgbaBytes[p + 2];
+
+                    if (rr >= r0 && rr <= r1 && gg >= g0 && gg <= g1 && bb >= b0 && bb <= b1)
+                        mask[rowBase + xx] = 255;
+                }
+            }
+
+            return mask;
+        }
+
+        using var src = Decode(imageBytes);
+        using var bgra = src.Channels() == 4 ? src.Clone() : new Mat();
+        if (src.Channels() != 4)
+            Cv2.CvtColor(src, bgra, ColorConversionCodes.BGR2BGRA);
+
+        // Convert ROI to BGR and apply InRange.
+        var rect = new Rect(x, y, width, height);
+        using var roi = new Mat(bgra, rect);
+        using var bgr = new Mat();
+        Cv2.CvtColor(roi, bgr, ColorConversionCodes.BGRA2BGR);
+
+        var lower = new Scalar(
+            Math.Max(0, target.B - tolerance),
+            Math.Max(0, target.G - tolerance),
+            Math.Max(0, target.R - tolerance));
+        var upper = new Scalar(
+            Math.Min(255, target.B + tolerance),
+            Math.Min(255, target.G + tolerance),
+            Math.Min(255, target.R + tolerance));
+
+        using var roiMask = new Mat();
+        Cv2.InRange(bgr, lower, upper, roiMask);
+
+        var full = new byte[iw * ih];
+        for (var yy = 0; yy < height; yy++)
+        {
+            var srcRow = roiMask.Ptr(yy);
+            var dstOffset = (y + yy) * iw + x;
+            Marshal.Copy(srcRow, full, dstOffset, width);
+        }
+
+        return full;
+    }
+
+    public byte[] FillByMask(byte[] imageBytes, byte[] mask, Rgba32 fillColor)
+    {
+        var (iw, ih) = GetSize(imageBytes);
+        if (iw <= 0 || ih <= 0)
+            throw new InvalidOperationException("Image size is unknown.");
+
+        if (mask is null || mask.Length != iw * ih)
+            throw new ArgumentException("Mask size mismatch.", nameof(mask));
+
+        if (OperatingSystem.IsBrowser())
+        {
+            var raw = GetRawOrThrow(imageBytes);
+            var dst = raw.RgbaBytes.ToArray();
+
+            for (var i = 0; i < mask.Length; i++)
+            {
+                if (mask[i] == 0)
+                    continue;
+
+                var p = i * 4;
+                dst[p + 0] = fillColor.R;
+                dst[p + 1] = fillColor.G;
+                dst[p + 2] = fillColor.B;
+                dst[p + 3] = 255;
+            }
+
+            return ReturnToken(new RawRgbaImage(iw, ih, dst));
+        }
+
+        using var src = Decode(imageBytes);
+        using var split = SplitBgrAndAlpha(src);
+        using var work = split.Bgr.Clone();
+        using var alpha = split.Alpha?.Clone() ?? new Mat(work.Rows, work.Cols, MatType.CV_8UC1, Scalar.All(255));
+
+        using var maskMat = new Mat(ih, iw, MatType.CV_8UC1, mask);
+        var bgr = new Scalar(fillColor.B, fillColor.G, fillColor.R);
+        work.SetTo(bgr, maskMat);
+        alpha.SetTo(Scalar.All(255), maskMat);
+
+        using var merged = MergeBgrAndAlpha(work, alpha);
+        return EncodeForDisplay(merged);
+    }
+
+    public byte[] DrawText(byte[] imageBytes, string text, int x, int y, Rgba32 color)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return imageBytes;
+
+        var (iw, ih) = GetSize(imageBytes);
+        if (iw <= 0 || ih <= 0)
+            throw new InvalidOperationException("Image size is unknown.");
+
+        x = Math.Clamp(x, 0, Math.Max(0, iw - 1));
+        y = Math.Clamp(y, 0, Math.Max(0, ih - 1));
+
+        if (OperatingSystem.IsBrowser())
+        {
+            // Minimal ASCII-only bitmap font fallback.
+            var raw = GetRawOrThrow(imageBytes);
+            var dst = raw.RgbaBytes.ToArray();
+            DrawAsciiText(dst, iw, ih, x, y, text, color);
+            return ReturnToken(new RawRgbaImage(iw, ih, dst));
+        }
+
+        using var src = Decode(imageBytes);
+        using var split = SplitBgrAndAlpha(src);
+        using var work = split.Bgr.Clone();
+        using var alpha = split.Alpha?.Clone() ?? new Mat(work.Rows, work.Cols, MatType.CV_8UC1, Scalar.All(255));
+
+        var bgr = new Scalar(color.B, color.G, color.R);
+        Cv2.PutText(work, text, new Point(x, y), HersheyFonts.HersheySimplex, 1.0, bgr, 2, LineTypes.AntiAlias);
+        // Approximate alpha as opaque for the text region by drawing a mask in parallel.
+        using (var tmp = new Mat(work.Rows, work.Cols, MatType.CV_8UC1, Scalar.All(0)))
+        {
+            Cv2.PutText(tmp, text, new Point(x, y), HersheyFonts.HersheySimplex, 1.0, Scalar.All(255), 2, LineTypes.AntiAlias);
+            alpha.SetTo(Scalar.All(255), tmp);
+        }
+
+        using var merged = MergeBgrAndAlpha(work, alpha);
+        return EncodeForDisplay(merged);
+    }
+
+    private static void DrawAsciiText(byte[] rgba, int width, int height, int x, int y, string text, Rgba32 color)
+    {
+        // 5x7 font (very small); we only support basic ASCII 32..126.
+        // Each glyph is 7 bytes, LSB on the left.
+        foreach (var ch in text)
+        {
+            if (ch == '\n')
+            {
+                y += 10;
+                x = 0;
+                continue;
+            }
+
+            if (ch < 32 || ch > 126)
+            {
+                x += 6;
+                continue;
+            }
+
+            var glyph = Ascii5x7[ch - 32];
+            for (var row = 0; row < 7; row++)
+            {
+                var bits = glyph[row];
+                var yy = y + row;
+                if ((uint)yy >= (uint)height)
+                    continue;
+
+                for (var col = 0; col < 5; col++)
+                {
+                    if (((bits >> col) & 1) == 0)
+                        continue;
+
+                    var xx = x + col;
+                    if ((uint)xx >= (uint)width)
+                        continue;
+
+                    var idx = (yy * width + xx) * 4;
+                    rgba[idx + 0] = color.R;
+                    rgba[idx + 1] = color.G;
+                    rgba[idx + 2] = color.B;
+                    rgba[idx + 3] = 255;
+                }
+            }
+
+            x += 6;
+        }
+    }
+
+    private static readonly byte[][] Ascii5x7 = BuildAscii5x7();
+
+    private static byte[][] BuildAscii5x7()
+    {
+        // Minimal built-in: digits + A-Z + a-z + basic punctuation; others blank.
+        // NOTE: This is intentionally tiny; unsupported glyphs render as spaces.
+        var table = new byte[95][];
+        for (var i = 0; i < table.Length; i++)
+            table[i] = new byte[7];
+
+        void Set(char c, params byte[] rows) => table[c - 32] = rows;
+
+        // Digits 0-9
+        Set('0', 0x1E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x1E);
+        Set('1', 0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E);
+        Set('2', 0x1E, 0x11, 0x01, 0x06, 0x08, 0x10, 0x1F);
+        Set('3', 0x1E, 0x11, 0x01, 0x0E, 0x01, 0x11, 0x1E);
+        Set('4', 0x02, 0x06, 0x0A, 0x12, 0x1F, 0x02, 0x02);
+        Set('5', 0x1F, 0x10, 0x1E, 0x01, 0x01, 0x11, 0x1E);
+        Set('6', 0x0E, 0x10, 0x1E, 0x11, 0x11, 0x11, 0x0E);
+        Set('7', 0x1F, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08);
+        Set('8', 0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E);
+        Set('9', 0x0E, 0x11, 0x11, 0x0F, 0x01, 0x02, 0x1C);
+
+        // Uppercase A-Z
+        Set('A', 0x0E, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11);
+        Set('B', 0x1E, 0x11, 0x11, 0x1E, 0x11, 0x11, 0x1E);
+        Set('C', 0x0E, 0x11, 0x10, 0x10, 0x10, 0x11, 0x0E);
+        Set('D', 0x1C, 0x12, 0x11, 0x11, 0x11, 0x12, 0x1C);
+        Set('E', 0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x1F);
+        Set('F', 0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x10);
+        Set('G', 0x0E, 0x11, 0x10, 0x17, 0x11, 0x11, 0x0E);
+        Set('H', 0x11, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11);
+        Set('I', 0x0E, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0E);
+        Set('J', 0x07, 0x02, 0x02, 0x02, 0x02, 0x12, 0x0C);
+        Set('K', 0x11, 0x12, 0x14, 0x18, 0x14, 0x12, 0x11);
+        Set('L', 0x10, 0x10, 0x10, 0x10, 0x10, 0x10, 0x1F);
+        Set('M', 0x11, 0x1B, 0x15, 0x15, 0x11, 0x11, 0x11);
+        Set('N', 0x11, 0x19, 0x15, 0x13, 0x11, 0x11, 0x11);
+        Set('O', 0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E);
+        Set('P', 0x1E, 0x11, 0x11, 0x1E, 0x10, 0x10, 0x10);
+        Set('Q', 0x0E, 0x11, 0x11, 0x11, 0x15, 0x12, 0x0D);
+        Set('R', 0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11);
+        Set('S', 0x0F, 0x10, 0x10, 0x0E, 0x01, 0x01, 0x1E);
+        Set('T', 0x1F, 0x04, 0x04, 0x04, 0x04, 0x04, 0x04);
+        Set('U', 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E);
+        Set('V', 0x11, 0x11, 0x11, 0x11, 0x11, 0x0A, 0x04);
+        Set('W', 0x11, 0x11, 0x11, 0x15, 0x15, 0x15, 0x0A);
+        Set('X', 0x11, 0x11, 0x0A, 0x04, 0x0A, 0x11, 0x11);
+        Set('Y', 0x11, 0x11, 0x0A, 0x04, 0x04, 0x04, 0x04);
+        Set('Z', 0x1F, 0x01, 0x02, 0x04, 0x08, 0x10, 0x1F);
+
+        // Lowercase a-z (basic)
+        Set('a', 0x00, 0x00, 0x0E, 0x01, 0x0F, 0x11, 0x0F);
+        Set('b', 0x10, 0x10, 0x1E, 0x11, 0x11, 0x11, 0x1E);
+        Set('c', 0x00, 0x00, 0x0E, 0x11, 0x10, 0x11, 0x0E);
+        Set('d', 0x01, 0x01, 0x0F, 0x11, 0x11, 0x11, 0x0F);
+        Set('e', 0x00, 0x00, 0x0E, 0x11, 0x1F, 0x10, 0x0E);
+        Set('f', 0x06, 0x08, 0x1E, 0x08, 0x08, 0x08, 0x08);
+        Set('g', 0x00, 0x00, 0x0F, 0x11, 0x11, 0x0F, 0x01);
+        Set('h', 0x10, 0x10, 0x1E, 0x11, 0x11, 0x11, 0x11);
+        Set('i', 0x04, 0x00, 0x0C, 0x04, 0x04, 0x04, 0x0E);
+        Set('j', 0x02, 0x00, 0x06, 0x02, 0x02, 0x12, 0x0C);
+        Set('k', 0x10, 0x10, 0x11, 0x12, 0x1C, 0x12, 0x11);
+        Set('l', 0x0C, 0x04, 0x04, 0x04, 0x04, 0x04, 0x0E);
+        Set('m', 0x00, 0x00, 0x1A, 0x15, 0x15, 0x11, 0x11);
+        Set('n', 0x00, 0x00, 0x1E, 0x11, 0x11, 0x11, 0x11);
+        Set('o', 0x00, 0x00, 0x0E, 0x11, 0x11, 0x11, 0x0E);
+        Set('p', 0x00, 0x00, 0x1E, 0x11, 0x11, 0x1E, 0x10);
+        Set('q', 0x00, 0x00, 0x0F, 0x11, 0x11, 0x0F, 0x01);
+        Set('r', 0x00, 0x00, 0x16, 0x19, 0x10, 0x10, 0x10);
+        Set('s', 0x00, 0x00, 0x0F, 0x10, 0x0E, 0x01, 0x1E);
+        Set('t', 0x08, 0x08, 0x1E, 0x08, 0x08, 0x08, 0x06);
+        Set('u', 0x00, 0x00, 0x11, 0x11, 0x11, 0x11, 0x0F);
+        Set('v', 0x00, 0x00, 0x11, 0x11, 0x11, 0x0A, 0x04);
+        Set('w', 0x00, 0x00, 0x11, 0x11, 0x15, 0x15, 0x0A);
+        Set('x', 0x00, 0x00, 0x11, 0x0A, 0x04, 0x0A, 0x11);
+        Set('y', 0x00, 0x00, 0x11, 0x11, 0x11, 0x0F, 0x01);
+        Set('z', 0x00, 0x00, 0x1F, 0x02, 0x04, 0x08, 0x1F);
+
+        // Punctuation
+        Set(' ', 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00);
+        Set('.', 0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x0C);
+        Set('-', 0x00, 0x00, 0x00, 0x1F, 0x00, 0x00, 0x00);
+        Set('_', 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1F);
+        Set(':', 0x00, 0x0C, 0x0C, 0x00, 0x0C, 0x0C, 0x00);
+        Set('/', 0x01, 0x02, 0x04, 0x08, 0x10, 0x00, 0x00);
+
+        return table;
     }
 
     public (int width, int height) GetSize(byte[]? bytes)
