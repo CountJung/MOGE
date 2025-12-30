@@ -95,6 +95,14 @@
                     CanvasReady="Vm!.OnCanvasReady"
                     StrokeCommitted="Vm!.OnStrokeCommittedAsync"
                     CanvasClicked="Vm!.OnCanvasClickedAsync" />
+
+                <MudOverlay Visible="@Vm!.IsProcessing"
+                        DarkBackground="true"
+                        AutoClose="false"
+                        Class="d-flex justify-center align-center"
+                        Style="z-index: 2000;">
+                    <MudProgressCircular Indeterminate="true" Color="Color.Primary" Size="MudBlazor.Size.Large" />
+                </MudOverlay>
     </MudItem>
 
     <MudItem xs="12" md="2" lg="2">
@@ -116,6 +124,30 @@
                 GrayscaleChanged="Vm!.OnGrayscaleChanged"
                 Sepia="@Vm!.Sepia"
                 SepiaChanged="Vm!.OnSepiaChanged"
+                Invert="@Vm!.Invert"
+                InvertChanged="Vm!.OnInvertChanged"
+                Saturation="@Vm!.Saturation"
+                SaturationChanged="Vm!.OnSaturationChanged"
+                Sketch="@Vm!.Sketch"
+                SketchChanged="Vm!.OnSketchChanged"
+                Cartoon="@Vm!.Cartoon"
+                CartoonChanged="Vm!.OnCartoonChanged"
+                Emboss="@Vm!.Emboss"
+                EmbossChanged="Vm!.OnEmbossChanged"
+                FilterSharpenAmount="@Vm!.FilterSharpenAmount"
+                FilterSharpenAmountChanged="Vm!.OnFilterSharpenAmountChanged"
+                GlowStrength="@Vm!.GlowStrength"
+                GlowStrengthChanged="Vm!.OnGlowStrengthChanged"
+                ColorMap="@Vm!.ColorMap"
+                ColorMapChanged="Vm!.OnColorMapChanged"
+                PosterizeLevels="@Vm!.PosterizeLevels"
+                PosterizeLevelsChanged="Vm!.OnPosterizeLevelsChanged"
+                PixelizeBlockSize="@Vm!.PixelizeBlockSize"
+                PixelizeBlockSizeChanged="Vm!.OnPixelizeBlockSizeChanged"
+                VignetteStrength="@Vm!.VignetteStrength"
+                VignetteStrengthChanged="Vm!.OnVignetteStrengthChanged"
+                NoiseAmount="@Vm!.NoiseAmount"
+                NoiseAmountChanged="Vm!.OnNoiseAmountChanged"
                 Canny="@Vm!.Canny"
                 CannyChanged="Vm!.OnCannyChanged"
                 CannyT1="@Vm!.CannyT1"

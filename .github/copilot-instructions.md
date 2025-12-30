@@ -93,7 +93,10 @@
   - “파일 포맷 bytes” 대신 “RawToken/Raw RGBA 캐시”가 흘러갈 수 있음을 항상 고려합니다.
   - Raw 캐시 miss 시 동작(예외/메시지)을 깨지지 않게 유지합니다.
 - 성능:
-  - 무거운 변환은 UI thread를 막지 않도록 `Task.Run` 패턴을 유지합니다(예: `SharedUI/Pages/Editor.razor`).
+  - 무거운 변환/필터/마스크 생성/썸네일 생성 등 **CPU-bound 이미지 연산은 UI thread를 막지 않도록 `Task.Run`(또는 동등한 백그라운드 실행)으로 감싸서 처리**합니다.
+  - 처리 중에는 사용자가 “멈춘 것처럼” 느끼지 않도록 **중앙 Progress ring**을 표시합니다.
+    - 기준 구현: `SharedUI/ViewModels/EditorViewModel.IsProcessing` (카운터 기반) + `SharedUI/Pages/Editor.razor`의 `MudOverlay + MudProgressCircular`.
+    - 새 이미지 연산을 추가할 때는 ViewModel에서 공통 헬퍼(예: `RunImageCpuAsync`)를 통해 실행하고, UI는 `IsProcessing`에 바인딩합니다.
 
 ## 코딩 스타일
 - 불필요한 리팩터링/포맷 변경은 피하고, 기존 패턴(서비스 주입, MudBlazor 컴포넌트 사용)을 따릅니다.

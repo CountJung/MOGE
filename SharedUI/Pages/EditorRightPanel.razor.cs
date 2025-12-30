@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Components;
+using SharedUI.Services;
 using SharedUI.ViewModels;
 
 namespace SharedUI.Pages;
@@ -29,6 +30,42 @@ public partial class EditorRightPanel
 
     [Parameter] public bool Sepia { get; set; }
     [Parameter] public EventCallback<bool> SepiaChanged { get; set; }
+
+    [Parameter] public bool Invert { get; set; }
+    [Parameter] public EventCallback<bool> InvertChanged { get; set; }
+
+    [Parameter] public double Saturation { get; set; }
+    [Parameter] public EventCallback<double> SaturationChanged { get; set; }
+
+    [Parameter] public bool Sketch { get; set; }
+    [Parameter] public EventCallback<bool> SketchChanged { get; set; }
+
+    [Parameter] public bool Cartoon { get; set; }
+    [Parameter] public EventCallback<bool> CartoonChanged { get; set; }
+
+    [Parameter] public bool Emboss { get; set; }
+    [Parameter] public EventCallback<bool> EmbossChanged { get; set; }
+
+    [Parameter] public double FilterSharpenAmount { get; set; }
+    [Parameter] public EventCallback<double> FilterSharpenAmountChanged { get; set; }
+
+    [Parameter] public double GlowStrength { get; set; }
+    [Parameter] public EventCallback<double> GlowStrengthChanged { get; set; }
+
+    [Parameter] public ColorMapStyle ColorMap { get; set; }
+    [Parameter] public EventCallback<ColorMapStyle> ColorMapChanged { get; set; }
+
+    [Parameter] public int PosterizeLevels { get; set; }
+    [Parameter] public EventCallback<int> PosterizeLevelsChanged { get; set; }
+
+    [Parameter] public int PixelizeBlockSize { get; set; }
+    [Parameter] public EventCallback<int> PixelizeBlockSizeChanged { get; set; }
+
+    [Parameter] public double VignetteStrength { get; set; }
+    [Parameter] public EventCallback<double> VignetteStrengthChanged { get; set; }
+
+    [Parameter] public double NoiseAmount { get; set; }
+    [Parameter] public EventCallback<double> NoiseAmountChanged { get; set; }
 
     [Parameter] public bool Canny { get; set; }
     [Parameter] public EventCallback<bool> CannyChanged { get; set; }
@@ -107,6 +144,14 @@ public partial class EditorRightPanel
     }
 
     private Task ToggleSepia() => SepiaChanged.InvokeAsync(!Sepia);
+
+    private Task ToggleInvert() => InvertChanged.InvokeAsync(!Invert);
+
+    private Task ToggleSketch() => SketchChanged.InvokeAsync(!Sketch);
+
+    private Task ToggleCartoon() => CartoonChanged.InvokeAsync(!Cartoon);
+
+    private Task ToggleEmboss() => EmbossChanged.InvokeAsync(!Emboss);
 
     private Task ToggleCanny() => CannyChanged.InvokeAsync(!Canny);
 }

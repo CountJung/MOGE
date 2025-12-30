@@ -1,4 +1,5 @@
 using OpenCvSharp;
+using SharedUI.Services;
 
 namespace SharedUI.Services.Raw;
 
@@ -63,6 +64,274 @@ internal static class RgbaImageOps
         return new RawRgbaImage(src.Width, src.Height, dst);
     }
 
+    public static RawRgbaImage Invert(in RawRgbaImage src)
+    {
+        var dst = new byte[src.RgbaBytes.Length];
+        for (var i = 0; i < dst.Length; i += 4)
+        {
+            dst[i + 0] = (byte)(255 - src.RgbaBytes[i + 0]);
+            dst[i + 1] = (byte)(255 - src.RgbaBytes[i + 1]);
+            dst[i + 2] = (byte)(255 - src.RgbaBytes[i + 2]);
+            dst[i + 3] = src.RgbaBytes[i + 3];
+        }
+
+        return new RawRgbaImage(src.Width, src.Height, dst);
+    }
+
+    public static RawRgbaImage AdjustSaturation(in RawRgbaImage src, double saturation)
+    {
+        var s = Math.Clamp(saturation, 0.0, 3.0);
+        if (Math.Abs(s - 1.0) < 0.0001)
+            return src;
+
+        var dst = new byte[src.RgbaBytes.Length];
+        for (var i = 0; i < dst.Length; i += 4)
+        {
+            var r = src.RgbaBytes[i + 0];
+            var g = src.RgbaBytes[i + 1];
+            var b = src.RgbaBytes[i + 2];
+
+            var y = (byte)Math.Clamp((int)Math.Round(0.299 * r + 0.587 * g + 0.114 * b), 0, 255);
+
+            dst[i + 0] = ClampToByte(y + (r - y) * s);
+            dst[i + 1] = ClampToByte(y + (g - y) * s);
+            dst[i + 2] = ClampToByte(y + (b - y) * s);
+            dst[i + 3] = src.RgbaBytes[i + 3];
+        }
+
+        return new RawRgbaImage(src.Width, src.Height, dst);
+    }
+
+    public static RawRgbaImage Posterize(in RawRgbaImage src, int levels)
+    {
+        var lv = Math.Clamp(levels, 2, 64);
+        var step = 255.0 / (lv - 1);
+
+        var dst = new byte[src.RgbaBytes.Length];
+        for (var i = 0; i < dst.Length; i += 4)
+        {
+            dst[i + 0] = QuantizeByte(src.RgbaBytes[i + 0], step);
+            dst[i + 1] = QuantizeByte(src.RgbaBytes[i + 1], step);
+            dst[i + 2] = QuantizeByte(src.RgbaBytes[i + 2], step);
+            dst[i + 3] = src.RgbaBytes[i + 3];
+        }
+
+        return new RawRgbaImage(src.Width, src.Height, dst);
+    }
+
+    public static RawRgbaImage Pixelize(in RawRgbaImage src, int blockSize)
+    {
+        var b = Math.Clamp(blockSize, 2, 256);
+        var w = src.Width;
+        var h = src.Height;
+        var s = src.RgbaBytes;
+        var dst = s.ToArray();
+
+        for (var y = 0; y < h; y += b)
+        {
+            var y2 = Math.Min(h, y + b);
+            for (var x = 0; x < w; x += b)
+            {
+                var x2 = Math.Min(w, x + b);
+
+                long sumR = 0;
+                long sumG = 0;
+                long sumB = 0;
+                long sumA = 0;
+                long count = 0;
+
+                for (var yy = y; yy < y2; yy++)
+                {
+                    var row = yy * w * 4;
+                    for (var xx = x; xx < x2; xx++)
+                    {
+                        var idx = row + xx * 4;
+                        sumR += s[idx + 0];
+                        sumG += s[idx + 1];
+                        sumB += s[idx + 2];
+                        sumA += s[idx + 3];
+                        count++;
+                    }
+                }
+
+                var r = (byte)(sumR / count);
+                var g = (byte)(sumG / count);
+                var bb = (byte)(sumB / count);
+                var a = (byte)(sumA / count);
+
+                for (var yy = y; yy < y2; yy++)
+                {
+                    var row = yy * w * 4;
+                    for (var xx = x; xx < x2; xx++)
+                    {
+                        var idx = row + xx * 4;
+                        dst[idx + 0] = r;
+                        dst[idx + 1] = g;
+                        dst[idx + 2] = bb;
+                        dst[idx + 3] = a;
+                    }
+                }
+            }
+        }
+
+        return new RawRgbaImage(w, h, dst);
+    }
+
+    public static RawRgbaImage Vignette(in RawRgbaImage src, double strength)
+    {
+        var s = Math.Clamp(strength, 0.0, 1.0);
+        if (s <= 0.0001)
+            return src;
+
+        var w = src.Width;
+        var h = src.Height;
+        var cx = (w - 1) / 2.0;
+        var cy = (h - 1) / 2.0;
+        var maxD = Math.Sqrt(cx * cx + cy * cy);
+
+        var dst = new byte[src.RgbaBytes.Length];
+        for (var y = 0; y < h; y++)
+        {
+            var dy = y - cy;
+            var row = y * w * 4;
+            for (var x = 0; x < w; x++)
+            {
+                var dx = x - cx;
+                var d = Math.Sqrt(dx * dx + dy * dy) / maxD;
+                var v = 1.0 - s * (d * d);
+                if (v < 0) v = 0;
+
+                var idx = row + x * 4;
+                dst[idx + 0] = ClampToByte(src.RgbaBytes[idx + 0] * v);
+                dst[idx + 1] = ClampToByte(src.RgbaBytes[idx + 1] * v);
+                dst[idx + 2] = ClampToByte(src.RgbaBytes[idx + 2] * v);
+                dst[idx + 3] = src.RgbaBytes[idx + 3];
+            }
+        }
+
+        return new RawRgbaImage(w, h, dst);
+    }
+
+    public static RawRgbaImage AddNoise(in RawRgbaImage src, double amount)
+    {
+        var a = Math.Clamp(amount, 0.0, 1.0);
+        if (a <= 0.0001)
+            return src;
+
+        var rng = new Random(12345);
+        var sigma = a * 50.0;
+
+        var dst = new byte[src.RgbaBytes.Length];
+        for (var i = 0; i < dst.Length; i += 4)
+        {
+            dst[i + 0] = ClampToByte(src.RgbaBytes[i + 0] + NextGaussian(rng) * sigma);
+            dst[i + 1] = ClampToByte(src.RgbaBytes[i + 1] + NextGaussian(rng) * sigma);
+            dst[i + 2] = ClampToByte(src.RgbaBytes[i + 2] + NextGaussian(rng) * sigma);
+            dst[i + 3] = src.RgbaBytes[i + 3];
+        }
+
+        return new RawRgbaImage(src.Width, src.Height, dst);
+    }
+
+    public static RawRgbaImage Emboss(in RawRgbaImage src)
+    {
+        var kernel = new float[]
+        {
+            -2, -1, 0,
+            -1,  1, 1,
+             0,  1, 2
+        };
+
+        return Convolve3x3(src, kernel, addBias: 128);
+    }
+
+    public static RawRgbaImage Glow(in RawRgbaImage src, int blurKernelSize, double strength)
+    {
+        var s = Math.Clamp(strength, 0.0, 1.0);
+        if (s <= 0.0001)
+            return src;
+
+        var k = NormalizeOddKernel(blurKernelSize > 1 ? blurKernelSize * 2 + 1 : 21);
+        var blur = GaussianBlur(src, k);
+
+        var dst = new byte[src.RgbaBytes.Length];
+        for (var i = 0; i < dst.Length; i += 4)
+        {
+            dst[i + 0] = ClampToByte(src.RgbaBytes[i + 0] + blur.RgbaBytes[i + 0] * s);
+            dst[i + 1] = ClampToByte(src.RgbaBytes[i + 1] + blur.RgbaBytes[i + 1] * s);
+            dst[i + 2] = ClampToByte(src.RgbaBytes[i + 2] + blur.RgbaBytes[i + 2] * s);
+            dst[i + 3] = src.RgbaBytes[i + 3];
+        }
+
+        return new RawRgbaImage(src.Width, src.Height, dst);
+    }
+
+    public static RawRgbaImage PencilSketch(in RawRgbaImage src, int blurKernelSize)
+    {
+        // Approx: grayscale -> invert -> blur -> color dodge
+        var gray = Grayscale(src);
+        var inv = Invert(gray);
+        var k = NormalizeOddKernel(Math.Max(11, blurKernelSize > 1 ? blurKernelSize * 2 + 1 : 21));
+        var blur = GaussianBlur(inv, k);
+
+        var dst = new byte[gray.RgbaBytes.Length];
+        for (var i = 0; i < dst.Length; i += 4)
+        {
+            var baseV = gray.RgbaBytes[i + 0];
+            var blurV = blur.RgbaBytes[i + 0];
+            var denom = 255 - blurV;
+            var outV = denom <= 0 ? 255 : Math.Min(255, (baseV * 256) / denom);
+            dst[i + 0] = (byte)outV;
+            dst[i + 1] = (byte)outV;
+            dst[i + 2] = (byte)outV;
+            dst[i + 3] = gray.RgbaBytes[i + 3];
+        }
+
+        return new RawRgbaImage(src.Width, src.Height, dst);
+    }
+
+    public static RawRgbaImage Cartoon(in RawRgbaImage src, int blurKernelSize, double edgeThreshold1, double edgeThreshold2)
+    {
+        var k = NormalizeOddKernel(Math.Max(5, blurKernelSize));
+        var smooth = GaussianBlur(src, k);
+        var edges = CannyEdge(smooth, edgeThreshold1, edgeThreshold2);
+
+        var dst = smooth.RgbaBytes.ToArray();
+        for (var i = 0; i < dst.Length; i += 4)
+        {
+            var e = edges.RgbaBytes[i + 0];
+            if (e > 0)
+            {
+                dst[i + 0] = 0;
+                dst[i + 1] = 0;
+                dst[i + 2] = 0;
+            }
+        }
+
+        return new RawRgbaImage(src.Width, src.Height, dst);
+    }
+
+    public static RawRgbaImage ApplyColorMap(in RawRgbaImage src, ColorMapStyle style)
+    {
+        if (style == ColorMapStyle.None)
+            return src;
+
+        var gray = ToGrayscaleBuffer(src);
+        var dst = new byte[src.RgbaBytes.Length];
+        for (var i = 0; i < gray.Length; i++)
+        {
+            var v = gray[i];
+            var (r, g, b) = MapColor(v, style);
+            var o = i * 4;
+            dst[o + 0] = r;
+            dst[o + 1] = g;
+            dst[o + 2] = b;
+            dst[o + 3] = src.RgbaBytes[o + 3];
+        }
+
+        return new RawRgbaImage(src.Width, src.Height, dst);
+    }
+
     public static RawRgbaImage GaussianBlur(in RawRgbaImage src, int kernelSize)
     {
         kernelSize = NormalizeOddKernel(kernelSize);
@@ -115,6 +384,116 @@ internal static class RgbaImageOps
         }
 
         return new RawRgbaImage(width, height, dst);
+    }
+
+    private static (byte r, byte g, byte b) MapColor(byte v, ColorMapStyle style)
+    {
+        return style switch
+        {
+            ColorMapStyle.Autumn => (255, v, 0),
+            ColorMapStyle.Winter => (0, v, (byte)(255 - v)),
+            ColorMapStyle.Ocean => (0, (byte)(v / 2), v),
+            ColorMapStyle.Summer => ((byte)(v / 2), (byte)Math.Min(255, 128 + v / 2), 64),
+            ColorMapStyle.Hot => HotRamp(v),
+            ColorMapStyle.Jet => JetRamp(v),
+            ColorMapStyle.Rainbow => JetRamp(v),
+            ColorMapStyle.Pink => (255, (byte)Math.Min(255, 128 + v / 2), (byte)Math.Min(255, 128 + v / 2)),
+            ColorMapStyle.Bone => (v, (byte)Math.Min(255, v + 32), (byte)Math.Min(255, v + 64)),
+            _ => JetRamp(v)
+        };
+    }
+
+    private static (byte r, byte g, byte b) HotRamp(byte v)
+    {
+        var t = v / 255.0;
+        var r = t < 1.0 / 3.0 ? t * 3.0 : 1.0;
+        var g = t < 1.0 / 3.0 ? 0.0 : (t < 2.0 / 3.0 ? (t - 1.0 / 3.0) * 3.0 : 1.0);
+        var b = t < 2.0 / 3.0 ? 0.0 : (t - 2.0 / 3.0) * 3.0;
+        return ((byte)(r * 255), (byte)(g * 255), (byte)(b * 255));
+    }
+
+    private static (byte r, byte g, byte b) JetRamp(byte v)
+    {
+        var t = v / 255.0;
+        double r = 0, g = 0, b = 0;
+        if (t < 0.25)
+        {
+            b = 1;
+            g = t / 0.25;
+        }
+        else if (t < 0.5)
+        {
+            b = (0.5 - t) / 0.25;
+            g = 1;
+        }
+        else if (t < 0.75)
+        {
+            r = (t - 0.5) / 0.25;
+            g = 1;
+        }
+        else
+        {
+            r = 1;
+            g = (1.0 - t) / 0.25;
+        }
+        return ((byte)(r * 255), (byte)(g * 255), (byte)(b * 255));
+    }
+
+    private static RawRgbaImage Convolve3x3(in RawRgbaImage src, float[] kernel, int addBias)
+    {
+        var w = src.Width;
+        var h = src.Height;
+        var s = src.RgbaBytes;
+        var dst = new byte[s.Length];
+
+        // Copy borders unchanged
+        Buffer.BlockCopy(s, 0, dst, 0, s.Length);
+
+        for (var y = 1; y < h - 1; y++)
+        {
+            for (var x = 1; x < w - 1; x++)
+            {
+                double sumR = 0;
+                double sumG = 0;
+                double sumB = 0;
+                var k = 0;
+
+                for (var ky = -1; ky <= 1; ky++)
+                {
+                    var row = (y + ky) * w * 4;
+                    for (var kx = -1; kx <= 1; kx++)
+                    {
+                        var idx = row + (x + kx) * 4;
+                        var kk = kernel[k++];
+                        sumR += s[idx + 0] * kk;
+                        sumG += s[idx + 1] * kk;
+                        sumB += s[idx + 2] * kk;
+                    }
+                }
+
+                var o = (y * w + x) * 4;
+                dst[o + 0] = ClampToByte(sumR + addBias);
+                dst[o + 1] = ClampToByte(sumG + addBias);
+                dst[o + 2] = ClampToByte(sumB + addBias);
+                dst[o + 3] = s[o + 3];
+            }
+        }
+
+        return new RawRgbaImage(w, h, dst);
+    }
+
+    private static byte QuantizeByte(byte v, double step)
+    {
+        var q = (int)Math.Round(v / step) * step;
+        return (byte)Math.Clamp(q, 0, 255);
+    }
+
+    private static double NextGaussian(Random rng)
+    {
+        // Box–Muller transform
+        var u1 = 1.0 - rng.NextDouble();
+        var u2 = 1.0 - rng.NextDouble();
+        return Math.Sqrt(-2.0 * Math.Log(u1)) * Math.Cos(2.0 * Math.PI * u2);
     }
 
     public static RawRgbaImage CannyEdge(in RawRgbaImage src, double threshold1, double threshold2)

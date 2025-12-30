@@ -56,6 +56,18 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
     private int _blurKernelSize;
     private bool _grayscale;
     private bool _sepia;
+    private bool _invert;
+    private double _saturation = 1.0;
+    private bool _sketch;
+    private bool _cartoon;
+    private bool _emboss;
+    private double _filterSharpenAmount;
+    private double _glowStrength;
+    private ColorMapStyle _colorMap = ColorMapStyle.None;
+    private int _posterizeLevels;
+    private int _pixelizeBlockSize;
+    private double _vignetteStrength;
+    private double _noiseAmount;
     private bool _canny;
     private double _cannyT1 = 50;
     private double _cannyT2 = 150;
@@ -64,6 +76,8 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
 
     private CancellationTokenSource? _debounceCts;
     private string? _status;
+
+    private int _processingCount;
 
     private sealed record LoadedImage(ImagePickResult Pick, string? ThumbnailDataUrl);
     private readonly List<LoadedImage> _loadedImages = new();
@@ -89,6 +103,8 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
     public string? ContentType => _document.ContentType;
 
     public byte[]? ViewBytes => _viewBytes;
+
+    public bool IsProcessing => Volatile.Read(ref _processingCount) > 0;
 
     public bool PerspectiveMode => _perspectiveMode;
     public bool CropMode => _cropMode;
@@ -123,6 +139,18 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
     public int BlurKernelSize => _blurKernelSize;
     public bool Grayscale => _grayscale;
     public bool Sepia => _sepia;
+    public bool Invert => _invert;
+    public double Saturation => _saturation;
+    public bool Sketch => _sketch;
+    public bool Cartoon => _cartoon;
+    public bool Emboss => _emboss;
+    public double FilterSharpenAmount => _filterSharpenAmount;
+    public double GlowStrength => _glowStrength;
+    public ColorMapStyle ColorMap => _colorMap;
+    public int PosterizeLevels => _posterizeLevels;
+    public int PixelizeBlockSize => _pixelizeBlockSize;
+    public double VignetteStrength => _vignetteStrength;
+    public double NoiseAmount => _noiseAmount;
     public bool Canny => _canny;
     public double CannyT1 => _cannyT1;
     public double CannyT2 => _cannyT2;
@@ -193,6 +221,18 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         _blurKernelSize = 0;
         _grayscale = false;
         _sepia = false;
+        _invert = false;
+        _saturation = 1.0;
+        _sketch = false;
+        _cartoon = false;
+        _emboss = false;
+        _filterSharpenAmount = 0.0;
+        _glowStrength = 0.0;
+        _colorMap = ColorMapStyle.None;
+        _posterizeLevels = 0;
+        _pixelizeBlockSize = 0;
+        _vignetteStrength = 0.0;
+        _noiseAmount = 0.0;
         _canny = false;
         _cannyT1 = 50;
         _cannyT2 = 150;
@@ -201,16 +241,50 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
 
         if (_document.Bytes is { Length: > 0 } bytes)
         {
-            var thumb = _imageProcessor.CreateThumbnailDataUrl(bytes);
-            _history.Add(new HistoryEntry(bytes, "Original", DateTime.UtcNow, thumb));
+            // Avoid heavy work (decode/thumbnail/size) on UI thread.
+            _history.Add(new HistoryEntry(bytes, "Original", DateTime.UtcNow, null));
             _historyIndex = 0;
+            _viewBytes = bytes;
+
+            _ = UpdateInitialImageMetaAsync(bytes);
         }
 
-        _viewBytes = CurrentBytes;
+        _viewBytes ??= CurrentBytes;
         _handles = new();
         _selectionMask = null;
-        (_imageWidth, _imageHeight) = _imageProcessor.GetSize(CurrentBytes);
+        _imageWidth = 0;
+        _imageHeight = 0;
         _status = null;
+    }
+
+    private async Task UpdateInitialImageMetaAsync(byte[] bytes)
+    {
+        try
+        {
+            var (thumb, size) = await RunImageCpuAsync(
+                () => (_imageProcessor.CreateThumbnailDataUrl(bytes), _imageProcessor.GetSize(bytes)),
+                inProgressStatus: "Loading...");
+
+            if (!HasImage)
+                return;
+
+            // Only update if the current image still matches.
+            if (CurrentBytes is not { Length: > 0 } current || !ReferenceEquals(current, bytes))
+                return;
+
+            if (_history.Count > 0 && ReferenceEquals(_history[0].Bytes, bytes) && _history[0].Label == "Original")
+            {
+                var old = _history[0];
+                _history[0] = new HistoryEntry(old.Bytes, old.Label, old.Timestamp, thumb);
+            }
+
+            (_imageWidth, _imageHeight) = size;
+            NotifyAll();
+        }
+        catch
+        {
+            // Best-effort only.
+        }
     }
 
     public async Task PickImagesAsync()
@@ -223,7 +297,13 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         foreach (var pick in picks)
         {
             string? thumb = null;
-            try { thumb = _imageProcessor.CreateThumbnailDataUrl(pick.Bytes); } catch { }
+            try
+            {
+                thumb = await RunImageCpuAsync(() => _imageProcessor.CreateThumbnailDataUrl(pick.Bytes), inProgressStatus: "Loading...");
+            }
+            catch
+            {
+            }
             _loadedImages.Add(new LoadedImage(pick, thumb));
         }
 
@@ -287,6 +367,38 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
 
     private void RefreshFooter() => _pushFooterMessage(_status);
 
+    private void BeginProcessing(string? status = null)
+    {
+        Interlocked.Increment(ref _processingCount);
+
+        if (!string.IsNullOrWhiteSpace(status))
+        {
+            _status = status;
+            RefreshFooter();
+        }
+
+        NotifyAll();
+    }
+
+    private void EndProcessing()
+    {
+        Interlocked.Decrement(ref _processingCount);
+        NotifyAll();
+    }
+
+    private async Task<T> RunImageCpuAsync<T>(Func<T> op, string? inProgressStatus = null, CancellationToken ct = default)
+    {
+        BeginProcessing(inProgressStatus);
+        try
+        {
+            return await Task.Run(op, ct);
+        }
+        finally
+        {
+            EndProcessing();
+        }
+    }
+
     private IReadOnlyList<EditorHistoryListItem> GetHistoryItems()
     {
         if (_history.Count == 0)
@@ -299,7 +411,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         return items;
     }
 
-    public Task OnPerspectiveModeChanged(bool enabled)
+    public async Task OnPerspectiveModeChanged(bool enabled)
     {
         _perspectiveMode = enabled;
 
@@ -317,7 +429,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
             _ = ApplyPipelineDebouncedAsync();
             RefreshFooter();
             NotifyAll();
-            return Task.CompletedTask;
+            return;
         }
 
         if (!HasImage)
@@ -325,13 +437,13 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
             _perspectiveMode = false;
             RefreshFooter();
             NotifyAll();
-            return Task.CompletedTask;
+            return;
         }
 
         var baseBytes = CurrentBytes;
         _viewBytes = baseBytes;
 
-        (_imageWidth, _imageHeight) = _imageProcessor.GetSize(baseBytes);
+        (_imageWidth, _imageHeight) = await RunImageCpuAsync(() => _imageProcessor.GetSize(baseBytes), inProgressStatus: "Preparing...");
         _handles = new List<CanvasPoint>
         {
             new(0, 0),
@@ -344,10 +456,10 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         RefreshFooter();
         NotifyAll();
 
-        return Task.CompletedTask;
+        return;
     }
 
-    public Task OnCropModeChanged(bool enabled)
+    public async Task OnCropModeChanged(bool enabled)
     {
         _cropMode = enabled;
 
@@ -362,13 +474,13 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
                 _cropMode = false;
                 RefreshFooter();
                 NotifyAll();
-                return Task.CompletedTask;
+                return;
             }
 
             var baseBytes = CurrentBytes;
             _viewBytes = baseBytes;
 
-            (_imageWidth, _imageHeight) = _imageProcessor.GetSize(baseBytes);
+            (_imageWidth, _imageHeight) = await RunImageCpuAsync(() => _imageProcessor.GetSize(baseBytes), inProgressStatus: "Preparing...");
 
             var mx = Math.Max(1, (int)Math.Round(_imageWidth * 0.1));
             var my = Math.Max(1, (int)Math.Round(_imageHeight * 0.1));
@@ -389,7 +501,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
             _status = "Crop: adjust corners";
             RefreshFooter();
             NotifyAll();
-            return Task.CompletedTask;
+            return;
         }
 
         _handles = new();
@@ -397,10 +509,10 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         RefreshFooter();
         NotifyAll();
         _ = ApplyPipelineDebouncedAsync();
-        return Task.CompletedTask;
+        return;
     }
 
-    public Task OnSelectionModeChanged(bool enabled)
+    public async Task OnSelectionModeChanged(bool enabled)
     {
         _selectionMode = enabled;
         _selectionMask = null;
@@ -417,13 +529,13 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
                 _selectionMode = false;
                 RefreshFooter();
                 NotifyAll();
-                return Task.CompletedTask;
+                return;
             }
 
             var baseBytes = CurrentBytes;
             _viewBytes = baseBytes;
 
-            (_imageWidth, _imageHeight) = _imageProcessor.GetSize(baseBytes);
+            (_imageWidth, _imageHeight) = await RunImageCpuAsync(() => _imageProcessor.GetSize(baseBytes), inProgressStatus: "Preparing...");
 
             var mx = Math.Max(1, (int)Math.Round(_imageWidth * 0.1));
             var my = Math.Max(1, (int)Math.Round(_imageHeight * 0.1));
@@ -444,14 +556,14 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
             _status = "Selection: adjust corners";
             RefreshFooter();
             NotifyAll();
-            return Task.CompletedTask;
+            return;
         }
 
         _handles = new();
         _status = null;
         RefreshFooter();
         NotifyAll();
-        return Task.CompletedTask;
+        return;
     }
 
     public Task OnInteractionModeChanged(CanvasInteractionMode mode)
@@ -622,7 +734,9 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         {
             var scale = (double)Math.Clamp(_textSize, 1, 8);
             var thickness = Math.Clamp(_textThickness, 1, 6);
-            next = await Task.Run(() => _imageProcessor.DrawText(baseBytes, _textInput, x, y, color, scale, thickness));
+            next = await RunImageCpuAsync(
+                () => _imageProcessor.DrawText(baseBytes, _textInput, x, y, color, scale, thickness),
+                inProgressStatus: "Applying text...");
         }
         catch (Exception ex)
         {
@@ -632,7 +746,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
             return;
         }
 
-        CommitHistory(next, "Text", preserveHandles: true);
+        await CommitHistoryAsync(next, "Text", preserveHandles: true);
         _status = "Text applied";
         RefreshFooter();
         NotifyAll();
@@ -709,10 +823,10 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         return Task.CompletedTask;
     }
 
-    public Task SelectSimilarColorsAsync()
+    public async Task SelectSimilarColorsAsync()
     {
         if (!HasImage)
-            return Task.CompletedTask;
+            return;
 
         int x0;
         int y0;
@@ -726,7 +840,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
                 _status = "Selection: expected 4 points";
                 RefreshFooter();
                 NotifyAll();
-                return Task.CompletedTask;
+                return;
             }
 
             (x0, y0, w, h) = GetHandlesRect();
@@ -747,7 +861,13 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
 
         try
         {
-            _selectionMask = _imageProcessor.CreateSimilarColorMask(CurrentBytes!, x0, y0, w, h, target, tolerance: _magicWandTolerance);
+            var baseBytes = CurrentBytes;
+            if (baseBytes is null)
+                return;
+
+            _selectionMask = await RunImageCpuAsync(
+                () => _imageProcessor.CreateSimilarColorMask(baseBytes, x0, y0, w, h, target, tolerance: _magicWandTolerance),
+                inProgressStatus: "Selecting similar colors...");
 
             // When not in selection mode, show a dashed preview rectangle (bounding box of the mask).
             _selectionPreviewHandles = _selectionMode
@@ -769,7 +889,6 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
 
         RefreshFooter();
         NotifyAll();
-        return Task.CompletedTask;
     }
 
     public async Task FillSelectionAsync()
@@ -815,7 +934,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         byte[] next;
         try
         {
-            next = await Task.Run(() => _imageProcessor.FillByMask(baseBytes, mask, fill));
+            next = await RunImageCpuAsync(() => _imageProcessor.FillByMask(baseBytes, mask, fill), inProgressStatus: "Filling selection...");
         }
         catch (Exception ex)
         {
@@ -825,7 +944,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
             return;
         }
 
-        CommitHistory(next, "Fill", preserveHandles: true);
+    await CommitHistoryAsync(next, "Fill", preserveHandles: true);
         _status = "Fill applied";
         RefreshFooter();
         NotifyAll();
@@ -865,7 +984,9 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         {
             var scale = (double)Math.Clamp(_textSize, 1, 8);
             var thickness = Math.Clamp(_textThickness, 1, 6);
-            next = await Task.Run(() => _imageProcessor.DrawText(baseBytes, _textInput, tx, ty, color, scale, thickness));
+            next = await RunImageCpuAsync(
+                () => _imageProcessor.DrawText(baseBytes, _textInput, tx, ty, color, scale, thickness),
+                inProgressStatus: "Applying text...");
         }
         catch (Exception ex)
         {
@@ -875,7 +996,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
             return;
         }
 
-        CommitHistory(next, "Text", preserveHandles: true);
+    await CommitHistoryAsync(next, "Text", preserveHandles: true);
         _status = "Text applied";
         RefreshFooter();
         NotifyAll();
@@ -951,7 +1072,9 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         byte[] next;
         try
         {
-            next = await Task.Run(() => _imageProcessor.BlurRegion(baseBytes, x0, y0, w, h, kernel));
+            next = await RunImageCpuAsync(
+                () => _imageProcessor.BlurRegion(baseBytes, x0, y0, w, h, kernel),
+                inProgressStatus: "Blurring selection...");
         }
         catch (Exception ex)
         {
@@ -961,7 +1084,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
             return;
         }
 
-        CommitHistory(next, "Blur", preserveHandles: true);
+    await CommitHistoryAsync(next, "Blur", preserveHandles: true);
         _status = "Blur applied";
         RefreshFooter();
         NotifyAll();
@@ -999,7 +1122,9 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         byte[] next;
         try
         {
-            next = await Task.Run(() => _imageProcessor.SharpenRegion(baseBytes, x0, y0, w, h, amount));
+            next = await RunImageCpuAsync(
+                () => _imageProcessor.SharpenRegion(baseBytes, x0, y0, w, h, amount),
+                inProgressStatus: "Sharpening selection...");
         }
         catch (Exception ex)
         {
@@ -1009,7 +1134,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
             return;
         }
 
-        CommitHistory(next, "Sharpen", preserveHandles: true);
+        await CommitHistoryAsync(next, "Sharpen", preserveHandles: true);
         _status = "Sharpen applied";
         RefreshFooter();
         NotifyAll();
@@ -1228,7 +1353,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         byte[] cropped;
         try
         {
-            cropped = await Task.Run(() => _imageProcessor.Crop(baseBytes, x0, y0, w, h));
+            cropped = await RunImageCpuAsync(() => _imageProcessor.Crop(baseBytes, x0, y0, w, h), inProgressStatus: "Cropping...");
         }
         catch (Exception ex)
         {
@@ -1240,7 +1365,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
 
         _cropMode = false;
         _handles = new();
-        CommitHistory(cropped, "Crop");
+        await CommitHistoryAsync(cropped, "Crop");
 
         _status = "Crop applied";
         RefreshFooter();
@@ -1276,7 +1401,9 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
                 ? Rgba32.FromHexOrDefault(_backgroundColorHex, new Rgba32(255, 255, 255, 255))
                 : Rgba32.FromHexOrDefault(_foregroundColorHex, new Rgba32(0, 0, 0, 255));
 
-            next = await Task.Run(() => _imageProcessor.ApplyStroke(baseBytes, stroke.Mode, stroke.Points, radius, color));
+            next = await RunImageCpuAsync(
+                () => _imageProcessor.ApplyStroke(baseBytes, stroke.Mode, stroke.Points, radius, color),
+                inProgressStatus: "Applying stroke...");
         }
         catch (Exception ex)
         {
@@ -1286,7 +1413,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
             return;
         }
 
-        CommitHistory(next, stroke.Mode == CanvasInteractionMode.Eraser ? "Eraser" : "Brush");
+        await CommitHistoryAsync(next, stroke.Mode == CanvasInteractionMode.Eraser ? "Eraser" : "Brush");
 
         _status = "Stroke applied";
         RefreshFooter();
@@ -1320,7 +1447,9 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         byte[] warped;
         try
         {
-            warped = await Task.Run(() => _imageProcessor.WarpPerspective(baseBytes, src, dst, _imageWidth, _imageHeight));
+            warped = await RunImageCpuAsync(
+                () => _imageProcessor.WarpPerspective(baseBytes, src, dst, _imageWidth, _imageHeight),
+                inProgressStatus: "Warping...");
         }
         catch (Exception ex)
         {
@@ -1331,7 +1460,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         }
 
         _perspectiveMode = false;
-        CommitHistory(warped, "Perspective");
+        await CommitHistoryAsync(warped, "Perspective");
 
         _status = "Perspective applied";
         RefreshFooter();
@@ -1363,7 +1492,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         byte[] transformed;
         try
         {
-            transformed = await Task.Run(() => transform(baseBytes));
+            transformed = await RunImageCpuAsync(() => transform(baseBytes), inProgressStatus: inProgressStatus);
         }
         catch (Exception ex)
         {
@@ -1373,7 +1502,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
             return;
         }
 
-        CommitHistory(transformed, label);
+        await CommitHistoryAsync(transformed, label);
 
         _status = "Transform applied";
         RefreshFooter();
@@ -1383,8 +1512,87 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
     }
 
     public Task OnBlurChanged(int v) { _blurKernelSize = v; NotifyAll(); return ApplyPipelineDebouncedAsync(); }
-    public Task OnGrayscaleChanged(bool v) { _grayscale = v; NotifyAll(); return ApplyPipelineDebouncedAsync(); }
-    public Task OnSepiaChanged(bool v) { _sepia = v; if (v) _grayscale = false; NotifyAll(); return ApplyPipelineDebouncedAsync(); }
+    public Task OnGrayscaleChanged(bool v)
+    {
+        _grayscale = v;
+        if (v)
+        {
+            _sepia = false;
+            _sketch = false;
+            _cartoon = false;
+            _colorMap = ColorMapStyle.None;
+        }
+        NotifyAll();
+        return ApplyPipelineDebouncedAsync();
+    }
+
+    public Task OnSepiaChanged(bool v)
+    {
+        _sepia = v;
+        if (v)
+        {
+            _grayscale = false;
+            _sketch = false;
+            _cartoon = false;
+            _colorMap = ColorMapStyle.None;
+        }
+        NotifyAll();
+        return ApplyPipelineDebouncedAsync();
+    }
+
+    public Task OnInvertChanged(bool v) { _invert = v; NotifyAll(); return ApplyPipelineDebouncedAsync(); }
+    public Task OnSaturationChanged(double v) { _saturation = v; NotifyAll(); return ApplyPipelineDebouncedAsync(); }
+
+    public Task OnSketchChanged(bool v)
+    {
+        _sketch = v;
+        if (v)
+        {
+            _cartoon = false;
+            _grayscale = false;
+            _sepia = false;
+            _colorMap = ColorMapStyle.None;
+        }
+        NotifyAll();
+        return ApplyPipelineDebouncedAsync();
+    }
+
+    public Task OnCartoonChanged(bool v)
+    {
+        _cartoon = v;
+        if (v)
+        {
+            _sketch = false;
+            _grayscale = false;
+            _sepia = false;
+            _colorMap = ColorMapStyle.None;
+        }
+        NotifyAll();
+        return ApplyPipelineDebouncedAsync();
+    }
+
+    public Task OnEmbossChanged(bool v) { _emboss = v; NotifyAll(); return ApplyPipelineDebouncedAsync(); }
+    public Task OnFilterSharpenAmountChanged(double v) { _filterSharpenAmount = v; NotifyAll(); return ApplyPipelineDebouncedAsync(); }
+    public Task OnGlowStrengthChanged(double v) { _glowStrength = v; NotifyAll(); return ApplyPipelineDebouncedAsync(); }
+
+    public Task OnColorMapChanged(ColorMapStyle v)
+    {
+        _colorMap = v;
+        if (v != ColorMapStyle.None)
+        {
+            _grayscale = false;
+            _sepia = false;
+            _sketch = false;
+            _cartoon = false;
+        }
+        NotifyAll();
+        return ApplyPipelineDebouncedAsync();
+    }
+
+    public Task OnPosterizeLevelsChanged(int v) { _posterizeLevels = v; NotifyAll(); return ApplyPipelineDebouncedAsync(); }
+    public Task OnPixelizeBlockSizeChanged(int v) { _pixelizeBlockSize = v; NotifyAll(); return ApplyPipelineDebouncedAsync(); }
+    public Task OnVignetteStrengthChanged(double v) { _vignetteStrength = v; NotifyAll(); return ApplyPipelineDebouncedAsync(); }
+    public Task OnNoiseAmountChanged(double v) { _noiseAmount = v; NotifyAll(); return ApplyPipelineDebouncedAsync(); }
     public Task OnCannyChanged(bool v) { _canny = v; NotifyAll(); return ApplyPipelineDebouncedAsync(); }
     public Task OnCannyT1Changed(double v) { _cannyT1 = v; NotifyAll(); return ApplyPipelineDebouncedAsync(); }
     public Task OnCannyT2Changed(double v) { _cannyT2 = v; NotifyAll(); return ApplyPipelineDebouncedAsync(); }
@@ -1421,18 +1629,33 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
                     BlurKernelSize: _blurKernelSize,
                     Grayscale: _grayscale,
                     Sepia: _sepia,
+                    Invert: _invert,
+                    Saturation: _saturation,
+                    Sketch: _sketch,
+                    Cartoon: _cartoon,
+                    Emboss: _emboss,
+                    SharpenAmount: _filterSharpenAmount,
+                    GlowStrength: _glowStrength,
+                    ColorMap: _colorMap,
+                    PosterizeLevels: _posterizeLevels,
+                    PixelizeBlockSize: _pixelizeBlockSize,
+                    VignetteStrength: _vignetteStrength,
+                    NoiseAmount: _noiseAmount,
                     Canny: _canny,
                     CannyThreshold1: _cannyT1,
                     CannyThreshold2: _cannyT2,
                     Contrast: _contrast,
                     Brightness: _brightness);
 
-                var processed = await Task.Run(() => _imageProcessor.ApplyPipeline(baseBytes, settings), token);
+                var processed = await RunImageCpuAsync(
+                    () => _imageProcessor.ApplyPipeline(baseBytes, settings),
+                    inProgressStatus: "Processing...",
+                    ct: token);
 
                 if (token.IsCancellationRequested)
                     return;
 
-                CommitHistory(processed, "Filters", replaceCurrentIfSameLabel: true, preserveHandles: _cropMode || _selectionMode);
+                await CommitHistoryAsync(processed, "Filters", replaceCurrentIfSameLabel: true, preserveHandles: _cropMode || _selectionMode);
                 _status = "Updated";
                 RefreshFooter();
                 NotifyAll();
@@ -1451,7 +1674,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         return Task.CompletedTask;
     }
 
-    private void CommitHistory(byte[] bytes, string label, bool replaceCurrentIfSameLabel = false, bool preserveHandles = false)
+    private async Task CommitHistoryAsync(byte[] bytes, string label, bool replaceCurrentIfSameLabel = false, bool preserveHandles = false)
     {
         if (!HasImage)
             return;
@@ -1459,7 +1682,9 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         if (_historyIndex >= 0 && _historyIndex < _history.Count - 1)
             _history.RemoveRange(_historyIndex + 1, _history.Count - _historyIndex - 1);
 
-        var thumb = _imageProcessor.CreateThumbnailDataUrl(bytes);
+        var (thumb, size) = await RunImageCpuAsync(
+            () => (_imageProcessor.CreateThumbnailDataUrl(bytes), _imageProcessor.GetSize(bytes)),
+            inProgressStatus: null);
 
         if (replaceCurrentIfSameLabel && _historyIndex >= 0 && _historyIndex == _history.Count - 1 && _history[_historyIndex].Label == label)
         {
@@ -1479,7 +1704,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         }
 
         _viewBytes = bytes;
-        (_imageWidth, _imageHeight) = _imageProcessor.GetSize(bytes);
+        (_imageWidth, _imageHeight) = size;
 
         if (!preserveHandles)
             _handles = new();
@@ -1489,12 +1714,12 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
     public Task RedoAsync() => GoToHistoryAsync(_historyIndex + 1);
     public Task ResetToOriginalAsync() => GoToHistoryAsync(0);
 
-    public Task GoToHistoryAsync(int index)
+    public async Task GoToHistoryAsync(int index)
     {
         if (!HasImage)
-            return Task.CompletedTask;
+            return;
         if (index < 0 || index >= _history.Count)
-            return Task.CompletedTask;
+            return;
 
         _debounceCts?.Cancel();
         _debounceCts?.Dispose();
@@ -1505,13 +1730,13 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
 
         var bytes = CurrentBytes;
         _viewBytes = bytes;
-        (_imageWidth, _imageHeight) = _imageProcessor.GetSize(bytes);
+        (_imageWidth, _imageHeight) = await RunImageCpuAsync(() => _imageProcessor.GetSize(bytes), inProgressStatus: "Loading...");
         _handles = new();
 
         _status = "History restored";
         RefreshFooter();
         NotifyAll();
-        return Task.CompletedTask;
+        return;
     }
 
     public async Task OnLayoutUndoRequestedAsync()

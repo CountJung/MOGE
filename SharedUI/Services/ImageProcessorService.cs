@@ -18,6 +18,18 @@ public sealed class ImageProcessorService
         int BlurKernelSize,
         bool Grayscale,
         bool Sepia,
+        bool Invert,
+        double Saturation,
+        bool Sketch,
+        bool Cartoon,
+        bool Emboss,
+        double SharpenAmount,
+        double GlowStrength,
+        ColorMapStyle ColorMap,
+        int PosterizeLevels,
+        int PixelizeBlockSize,
+        double VignetteStrength,
+        double NoiseAmount,
         bool Canny,
         double CannyThreshold1,
         double CannyThreshold2,
@@ -40,6 +52,30 @@ public sealed class ImageProcessorService
             tmp.CopyTo(work);
         }
 
+        if (Math.Abs(settings.Saturation - 1.0) > 0.0001)
+        {
+            var sat = Math.Clamp(settings.Saturation, 0.0, 3.0);
+            using var hsv = new Mat();
+            Cv2.CvtColor(work, hsv, ColorConversionCodes.BGR2HSV);
+            Cv2.Split(hsv, out var ch);
+            using (ch[0])
+            using (ch[1])
+            using (ch[2])
+            {
+                using var s32 = new Mat();
+                ch[1].ConvertTo(s32, MatType.CV_32FC1);
+                Cv2.Multiply(s32, sat, s32);
+                Cv2.Min(s32, Scalar.All(255), s32);
+                s32.ConvertTo(ch[1], MatType.CV_8UC1);
+
+                using var merged = new Mat();
+                Cv2.Merge(ch, merged);
+                using var dst = new Mat();
+                Cv2.CvtColor(merged, dst, ColorConversionCodes.HSV2BGR);
+                dst.CopyTo(work);
+            }
+        }
+
         if (settings.BlurKernelSize > 1)
         {
             var k = NormalizeOddKernel(settings.BlurKernelSize);
@@ -48,7 +84,63 @@ public sealed class ImageProcessorService
             tmp.CopyTo(work);
         }
 
-        if (settings.Sepia)
+        if (settings.Invert)
+        {
+            using var tmp = new Mat();
+            Cv2.BitwiseNot(work, tmp);
+            tmp.CopyTo(work);
+        }
+
+        if (settings.Sketch)
+        {
+            // Pencil sketch: gray -> invert -> blur -> color dodge
+            using var gray = new Mat();
+            Cv2.CvtColor(work, gray, ColorConversionCodes.BGR2GRAY);
+
+            using var inv = new Mat();
+            Cv2.BitwiseNot(gray, inv);
+
+            var k = NormalizeOddKernel(Math.Max(11, settings.BlurKernelSize > 1 ? settings.BlurKernelSize * 2 + 1 : 21));
+            using var blur = new Mat();
+            Cv2.GaussianBlur(inv, blur, new Size(k, k), 0);
+
+            using var denom = new Mat();
+            Cv2.Subtract(new Scalar(255), blur, denom);
+
+            using var dodge = new Mat();
+            Cv2.Divide(gray, denom, dodge, scale: 256.0);
+
+            using var dst = new Mat();
+            Cv2.CvtColor(dodge, dst, ColorConversionCodes.GRAY2BGR);
+            dst.CopyTo(work);
+        }
+        else if (settings.Cartoon)
+        {
+            // Simplified cartoon: bilateral smoothing + edge mask + combine
+            using var smooth = work.Clone();
+            for (var i = 0; i < 3; i++)
+            {
+                using var tmp = new Mat();
+                Cv2.BilateralFilter(smooth, tmp, d: 9, sigmaColor: 75, sigmaSpace: 75);
+                tmp.CopyTo(smooth);
+            }
+
+            using var gray = new Mat();
+            Cv2.CvtColor(smooth, gray, ColorConversionCodes.BGR2GRAY);
+            using var blur = new Mat();
+            Cv2.MedianBlur(gray, blur, 7);
+
+            using var edges = new Mat();
+            Cv2.AdaptiveThreshold(blur, edges, 255,
+                AdaptiveThresholdTypes.MeanC, ThresholdTypes.Binary, 9, 2);
+
+            using var edgesBgr = new Mat();
+            Cv2.CvtColor(edges, edgesBgr, ColorConversionCodes.GRAY2BGR);
+            using var dst = new Mat();
+            Cv2.BitwiseAnd(smooth, edgesBgr, dst);
+            dst.CopyTo(work);
+        }
+        else if (settings.Sepia)
         {
             using var src32 = new Mat();
             work.ConvertTo(src32, MatType.CV_32FC3, 1.0 / 255.0);
@@ -74,6 +166,134 @@ public sealed class ImageProcessorService
             using var dst = new Mat();
             Cv2.CvtColor(gray, dst, ColorConversionCodes.GRAY2BGR);
             dst.CopyTo(work);
+        }
+
+        if (settings.Emboss)
+        {
+            using var kernel = new Mat(3, 3, MatType.CV_32FC1);
+            kernel.SetArray<float>(
+                -2, -1, 0,
+                -1, 1, 1,
+                0, 1, 2);
+
+            using var tmp = new Mat();
+            Cv2.Filter2D(work, tmp, work.Type(), kernel);
+            Cv2.Add(tmp, new Scalar(128, 128, 128), tmp);
+            tmp.CopyTo(work);
+        }
+
+        if (settings.SharpenAmount > 0.0001)
+        {
+            var a = Math.Clamp(settings.SharpenAmount, 0.0, 3.0);
+            using var kernel = new Mat(3, 3, MatType.CV_32FC1);
+            var c = (float)(1 + 4 * a);
+            var n = (float)(-a);
+            kernel.SetArray<float>(
+                0, n, 0,
+                n, c, n,
+                0, n, 0);
+
+            using var tmp = new Mat();
+            Cv2.Filter2D(work, tmp, work.Type(), kernel);
+            tmp.CopyTo(work);
+        }
+
+        if (settings.GlowStrength > 0.0001)
+        {
+            var strength = Math.Clamp(settings.GlowStrength, 0.0, 1.0);
+            var k = NormalizeOddKernel(settings.BlurKernelSize > 1 ? settings.BlurKernelSize * 2 + 1 : 21);
+            using var blur = new Mat();
+            Cv2.GaussianBlur(work, blur, new Size(k, k), 0);
+            using var tmp = new Mat();
+            Cv2.AddWeighted(work, 1.0, blur, strength, 0.0, tmp);
+            tmp.CopyTo(work);
+        }
+
+        if (settings.PosterizeLevels >= 2)
+        {
+            var levels = Math.Clamp(settings.PosterizeLevels, 2, 32);
+            var step = 255.0 / (levels - 1);
+            var lut = new Mat(1, 256, MatType.CV_8UC1);
+            for (var i = 0; i < 256; i++)
+            {
+                var q = (int)Math.Round(i / step) * step;
+                lut.Set(0, i, (byte)Math.Clamp(q, 0, 255));
+            }
+
+            Cv2.LUT(work, lut, work);
+        }
+
+        if (settings.ColorMap != ColorMapStyle.None)
+        {
+            using var gray = new Mat();
+            Cv2.CvtColor(work, gray, ColorConversionCodes.BGR2GRAY);
+
+            var cm = settings.ColorMap switch
+            {
+                ColorMapStyle.Autumn => ColormapTypes.Autumn,
+                ColorMapStyle.Bone => ColormapTypes.Bone,
+                ColorMapStyle.Ocean => ColormapTypes.Ocean,
+                ColorMapStyle.Summer => ColormapTypes.Summer,
+                ColorMapStyle.Hot => ColormapTypes.Hot,
+                ColorMapStyle.Winter => ColormapTypes.Winter,
+                ColorMapStyle.Jet => ColormapTypes.Jet,
+                ColorMapStyle.Rainbow => ColormapTypes.Rainbow,
+                ColorMapStyle.Pink => ColormapTypes.Pink,
+                _ => ColormapTypes.Jet
+            };
+
+            using var dst = new Mat();
+            Cv2.ApplyColorMap(gray, dst, cm);
+            dst.CopyTo(work);
+        }
+
+        if (settings.VignetteStrength > 0.0001)
+        {
+            var strength = Math.Clamp(settings.VignetteStrength, 0.0, 1.0);
+            var rows = work.Rows;
+            var cols = work.Cols;
+
+            using var kernelX = Cv2.GetGaussianKernel(cols, cols / 2.0)!;
+            using var kernelY = Cv2.GetGaussianKernel(rows, rows / 2.0)!;
+            using var mask = (kernelY * kernelX.T()).ToMat();
+
+            Cv2.Normalize(mask, mask, 0.0, 1.0, NormTypes.MinMax);
+            // Blend mask toward 1.0 based on strength
+            using var ones = new Mat(mask.Size(), mask.Type(), Scalar.All(1.0));
+            using var mask2 = new Mat();
+            Cv2.AddWeighted(mask, strength, ones, 1.0 - strength, 0.0, mask2);
+
+            using var work32 = new Mat();
+            work.ConvertTo(work32, MatType.CV_32FC3, 1.0 / 255.0);
+            using var mask3 = new Mat();
+            Cv2.Merge(new[] { mask2, mask2, mask2 }, mask3);
+            Cv2.Multiply(work32, mask3, work32);
+            work32.ConvertTo(work, MatType.CV_8UC3, 255.0);
+        }
+
+        if (settings.PixelizeBlockSize >= 2)
+        {
+            var b = Math.Clamp(settings.PixelizeBlockSize, 2, 128);
+            var smallW = Math.Max(1, work.Cols / b);
+            var smallH = Math.Max(1, work.Rows / b);
+            using var small = new Mat();
+            Cv2.Resize(work, small, new Size(smallW, smallH), 0, 0, InterpolationFlags.Linear);
+            using var tmp = new Mat();
+            Cv2.Resize(small, tmp, new Size(work.Cols, work.Rows), 0, 0, InterpolationFlags.Nearest);
+            tmp.CopyTo(work);
+        }
+
+        if (settings.NoiseAmount > 0.0001)
+        {
+            var amount = Math.Clamp(settings.NoiseAmount, 0.0, 1.0);
+            var sigma = amount * 50.0;
+            using var noise = new Mat(work.Size(), MatType.CV_16SC3);
+            Cv2.Randn(noise, Scalar.All(0), Scalar.All(sigma));
+            using var work16 = new Mat();
+            work.ConvertTo(work16, MatType.CV_16SC3);
+            using var tmp = new Mat();
+            Cv2.Add(work16, noise, tmp);
+            tmp.ConvertTo(work, MatType.CV_8UC3);
         }
 
         if (settings.Canny)
@@ -1539,13 +1759,48 @@ public sealed class ImageProcessorService
         if (Math.Abs(settings.Contrast - 1.0) > 0.0001 || Math.Abs(settings.Brightness) > 0.0001)
             work = Raw.RgbaImageOps.AdjustBrightnessContrast(work, settings.Contrast, settings.Brightness);
 
+        if (Math.Abs(settings.Saturation - 1.0) > 0.0001)
+            work = Raw.RgbaImageOps.AdjustSaturation(work, settings.Saturation);
+
         if (settings.BlurKernelSize > 1)
             work = Raw.RgbaImageOps.GaussianBlur(work, settings.BlurKernelSize);
+
+        if (settings.Invert)
+            work = Raw.RgbaImageOps.Invert(work);
+
+        if (settings.Sketch)
+            work = Raw.RgbaImageOps.PencilSketch(work, settings.BlurKernelSize);
+        else if (settings.Cartoon)
+            work = Raw.RgbaImageOps.Cartoon(work, settings.BlurKernelSize, settings.CannyThreshold1, settings.CannyThreshold2);
 
         if (settings.Sepia)
             work = Raw.RgbaImageOps.Sepia(work);
         else if (settings.Grayscale)
             work = Raw.RgbaImageOps.Grayscale(work);
+
+        if (settings.Emboss)
+            work = Raw.RgbaImageOps.Emboss(work);
+
+        if (settings.SharpenAmount > 0.0001)
+            work = Raw.RgbaImageOps.Sharpen(work, settings.SharpenAmount);
+
+        if (settings.GlowStrength > 0.0001)
+            work = Raw.RgbaImageOps.Glow(work, settings.BlurKernelSize, settings.GlowStrength);
+
+        if (settings.PosterizeLevels >= 2)
+            work = Raw.RgbaImageOps.Posterize(work, settings.PosterizeLevels);
+
+        if (settings.ColorMap != ColorMapStyle.None)
+            work = Raw.RgbaImageOps.ApplyColorMap(work, settings.ColorMap);
+
+        if (settings.VignetteStrength > 0.0001)
+            work = Raw.RgbaImageOps.Vignette(work, settings.VignetteStrength);
+
+        if (settings.PixelizeBlockSize >= 2)
+            work = Raw.RgbaImageOps.Pixelize(work, settings.PixelizeBlockSize);
+
+        if (settings.NoiseAmount > 0.0001)
+            work = Raw.RgbaImageOps.AddNoise(work, settings.NoiseAmount);
 
         if (settings.Canny)
             work = Raw.RgbaImageOps.CannyEdge(work, settings.CannyThreshold1, settings.CannyThreshold2);
