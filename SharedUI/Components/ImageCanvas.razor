@@ -14,6 +14,25 @@
             @onpointerleave="OnPointerUp">
         </canvas>
 
+        @if (ShowOverlayRectangle && OverlayHandles is { Count: >= 2 })
+        {
+            var minX = OverlayHandles.Min(p => p.X);
+            var maxX = OverlayHandles.Max(p => p.X);
+            var minY = OverlayHandles.Min(p => p.Y);
+            var maxY = OverlayHandles.Max(p => p.Y);
+
+            var rectLeft = _offsetX + (minX * _scale);
+            var rectTop = _offsetY + (minY * _scale);
+            var rectWidth = (maxX - minX) * _scale;
+            var rectHeight = (maxY - minY) * _scale;
+
+            var border = OverlayDashed
+                ? "2px dashed var(--mud-palette-primary)"
+                : "2px solid var(--mud-palette-primary)";
+
+            <div style="position:absolute; left:@(rectLeft)px; top:@(rectTop)px; width:@(rectWidth)px; height:@(rectHeight)px; box-sizing:border-box; border:@border; pointer-events:none;"></div>
+        }
+
         @if (EnableHandles && Handles is { Count: > 0 })
         {
             @if (HandlesAsRectangle && Handles.Count >= 2)
@@ -72,6 +91,10 @@
     [Parameter] public bool HandlesAsRectangle { get; set; }
     [Parameter] public IReadOnlyList<CanvasPoint>? Handles { get; set; }
     [Parameter] public EventCallback<IReadOnlyList<CanvasPoint>> HandlesChanged { get; set; }
+
+    [Parameter] public bool ShowOverlayRectangle { get; set; }
+    [Parameter] public bool OverlayDashed { get; set; }
+    [Parameter] public IReadOnlyList<CanvasPoint>? OverlayHandles { get; set; }
 
     [Parameter] public EventCallback<ElementReference> CanvasReady { get; set; }
 

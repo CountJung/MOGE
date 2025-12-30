@@ -40,6 +40,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
     private string _backgroundColorHex = "#ffffff";
     private string _textInput = string.Empty;
     private byte[]? _selectionMask;
+    private List<CanvasPoint> _selectionPreviewHandles = new();
 
     private int _selectionBlurKernelSize;
     private double _selectionSharpenAmount = 1.0;
@@ -92,6 +93,9 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
     public string BackgroundColorHex => _backgroundColorHex;
 
     public string TextInput => _textInput;
+
+    public bool HasSelectionPreview => _selectionPreviewHandles.Count == 4;
+    public IReadOnlyList<CanvasPoint> SelectionPreviewHandles => _selectionPreviewHandles;
 
     public IReadOnlyList<CanvasPoint> Handles => _handles;
 
@@ -382,6 +386,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
     {
         _selectionMode = enabled;
         _selectionMask = null;
+        _selectionPreviewHandles = new();
 
         if (enabled)
         {
@@ -474,6 +479,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
                 .ToList();
 
             _selectionMask = null;
+            _selectionPreviewHandles = new();
 
             NotifyAll();
             return Task.CompletedTask;
@@ -481,6 +487,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
 
         _handles = updated.ToList();
         _selectionMask = null;
+        _selectionPreviewHandles = new();
         NotifyAll();
         return Task.CompletedTask;
     }
@@ -508,18 +515,34 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
 
     public Task SelectSimilarColorsAsync()
     {
-        if (!HasImage || !_selectionMode)
+        if (!HasImage)
             return Task.CompletedTask;
 
-        if (_handles.Count != 4)
+        int x0;
+        int y0;
+        int w;
+        int h;
+
+        if (_selectionMode)
         {
-            _status = "Selection: expected 4 points";
-            RefreshFooter();
-            NotifyAll();
-            return Task.CompletedTask;
+            if (_handles.Count != 4)
+            {
+                _status = "Selection: expected 4 points";
+                RefreshFooter();
+                NotifyAll();
+                return Task.CompletedTask;
+            }
+
+            (x0, y0, w, h) = GetHandlesRect();
+        }
+        else
+        {
+            x0 = 0;
+            y0 = 0;
+            w = Math.Max(1, _imageWidth);
+            h = Math.Max(1, _imageHeight);
         }
 
-        var (x0, y0, w, h) = GetHandlesRect();
         var target = Rgba32.FromHexOrDefault(_foregroundColorHex, new Rgba32(0, 0, 0, 255));
 
         _status = "Selecting similar colors...";
@@ -530,11 +553,18 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         {
             // Fixed tolerance for MVP.
             _selectionMask = _imageProcessor.CreateSimilarColorMask(CurrentBytes!, x0, y0, w, h, target, tolerance: 30);
+
+            // When not in selection mode, show a dashed preview rectangle (bounding box of the mask).
+            _selectionPreviewHandles = _selectionMode
+                ? new()
+                : ComputeMaskBoundingRectHandles(_selectionMask, _imageWidth, _imageHeight);
+
             _status = "Similar colors selected";
         }
         catch (Exception ex)
         {
             _status = ex.Message;
+            _selectionPreviewHandles = new();
         }
 
         RefreshFooter();
@@ -793,6 +823,52 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         var w = Math.Max(1, x1 - x0);
         var h = Math.Max(1, y1 - y0);
         return (x0, y0, w, h);
+    }
+
+    private static List<CanvasPoint> ComputeMaskBoundingRectHandles(byte[]? mask, int width, int height)
+    {
+        if (mask is null || mask.Length == 0 || width <= 0 || height <= 0)
+            return new();
+
+        if (mask.Length != width * height)
+            return new();
+
+        var minX = int.MaxValue;
+        var minY = int.MaxValue;
+        var maxX = -1;
+        var maxY = -1;
+
+        for (var y = 0; y < height; y++)
+        {
+            var row = y * width;
+            for (var x = 0; x < width; x++)
+            {
+                if (mask[row + x] == 0)
+                    continue;
+
+                if (x < minX) minX = x;
+                if (y < minY) minY = y;
+                if (x > maxX) maxX = x;
+                if (y > maxY) maxY = y;
+            }
+        }
+
+        if (maxX < minX || maxY < minY)
+            return new();
+
+        // Convert inclusive bounds to edge coordinates.
+        var left = Math.Clamp(minX, 0, width);
+        var top = Math.Clamp(minY, 0, height);
+        var right = Math.Clamp(maxX + 1, 0, width);
+        var bottom = Math.Clamp(maxY + 1, 0, height);
+
+        return new List<CanvasPoint>
+        {
+            new(left, top),
+            new(right, top),
+            new(right, bottom),
+            new(left, bottom)
+        };
     }
 
     public async Task ApplyCropAsync()

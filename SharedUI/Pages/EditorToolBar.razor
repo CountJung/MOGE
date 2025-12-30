@@ -27,7 +27,7 @@
 
             <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Style="flex-wrap:wrap;">
                 <MudTooltip Text="Select similar colors (within selection rectangle)">
-                    <MudIconButton Icon="@Icons.Material.Filled.Colorize" Disabled="@(!HasImage || !SelectionMode)"
+                    <MudIconButton Icon="@Icons.Material.Filled.Colorize" Disabled="@(!HasImage)"
                                    OnClick="@(async () => await SelectSimilarColors.InvokeAsync())" aria-label="Select similar colors" />
                 </MudTooltip>
                 <MudTooltip Text="Fill selection with FG">
