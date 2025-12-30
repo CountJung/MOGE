@@ -130,6 +130,9 @@
 
     private byte[]? _lastBytes;
 
+    private int _imagePixelWidth;
+    private int _imagePixelHeight;
+
     private double _scale = 1.0;
     private double _offsetX;
     private double _offsetY;
@@ -148,6 +151,7 @@
     private double _pinchStartImageX;
     private double _pinchStartImageY;
     private DomRect? _panZoomRect;
+    private DomRect? _lastCanvasRect;
 
     private double _panVelocityX;
     private double _panVelocityY;
@@ -214,6 +218,8 @@
             _scale = 1;
             _offsetX = 0;
             _offsetY = 0;
+            _imagePixelWidth = 0;
+            _imagePixelHeight = 0;
             return;
         }
 
@@ -224,6 +230,8 @@
             if (RawProvider.TryGet(sig, out var raw) && raw.RgbaBytes is { Length: > 0 })
             {
                 await Js.InvokeVoidAsync("mogeCanvas.setRawRgba", _canvas, raw.Width, raw.Height, raw.RgbaBytes);
+                _imagePixelWidth = raw.Width;
+                _imagePixelHeight = raw.Height;
                 await RedrawAsync();
                 return;
             }
@@ -231,8 +239,33 @@
 
         var ct = InferContentType(ImageBytes, ContentType);
         var dataUrl = $"data:{ct};base64,{Convert.ToBase64String(ImageBytes)}";
-        await Js.InvokeAsync<object>("mogeCanvas.setImage", _canvas, dataUrl);
+        var info = await Js.InvokeAsync<ImageInfo>("mogeCanvas.setImage", _canvas, dataUrl);
+        _imagePixelWidth = Math.Max(0, info.width);
+        _imagePixelHeight = Math.Max(0, info.height);
         await RedrawAsync();
+    }
+
+    private void ClampPanZoomToCanvas(DomRect rect)
+    {
+        if (_imagePixelWidth <= 0 || _imagePixelHeight <= 0)
+            return;
+
+        var canvasW = Math.Max(1.0, rect.width);
+        var canvasH = Math.Max(1.0, rect.height);
+
+        var imageW = Math.Max(1.0, _imagePixelWidth * _scale);
+        var imageH = Math.Max(1.0, _imagePixelHeight * _scale);
+
+        // Clamp offsets so the image stays within the canvas.
+        // - If the image is smaller than the canvas, allow panning within the extra slack.
+        // - If the image is larger, prevent "blank" areas by keeping the canvas covered.
+        var minX = Math.Min(0.0, canvasW - imageW);
+        var maxX = Math.Max(0.0, canvasW - imageW);
+        _offsetX = Math.Clamp(_offsetX, minX, maxX);
+
+        var minY = Math.Min(0.0, canvasH - imageH);
+        var maxY = Math.Max(0.0, canvasH - imageH);
+        _offsetY = Math.Clamp(_offsetY, minY, maxY);
     }
 
     private static string InferContentType(byte[] bytes, string? provided)
@@ -297,6 +330,8 @@
         CancelInertia();
 
         var rect = await Js.InvokeAsync<DomRect>("mogeCanvas.getRect", _canvas);
+        _panZoomRect = rect;
+        _lastCanvasRect = rect;
         var x = e.ClientX - rect.left;
         var y = e.ClientY - rect.top;
 
@@ -310,6 +345,8 @@
         _offsetX = x - (x - _offsetX) * (newScale / oldScale);
         _offsetY = y - (y - _offsetY) * (newScale / oldScale);
         _scale = newScale;
+
+        ClampPanZoomToCanvas(rect);
 
         await RedrawAsync();
     }
@@ -343,6 +380,8 @@
                 if (_panZoomRect is null)
                     _panZoomRect = await Js.InvokeAsync<DomRect>("mogeCanvas.getRect", _canvas);
 
+                _lastCanvasRect = _panZoomRect;
+
                 BeginPinch(_panZoomRect);
                 return;
             }
@@ -364,6 +403,7 @@
         _lastClientY = e.ClientY;
 
         _panZoomRect ??= await Js.InvokeAsync<DomRect>("mogeCanvas.getRect", _canvas);
+        _lastCanvasRect = _panZoomRect;
         _lastPanMoveTick = Environment.TickCount64;
         _panVelocityX = 0;
         _panVelocityY = 0;
@@ -392,6 +432,8 @@
             if (_panZoomRect is null)
                 _panZoomRect = await Js.InvokeAsync<DomRect>("mogeCanvas.getRect", _canvas);
 
+            _lastCanvasRect = _panZoomRect;
+
             if (_activePointers.Count < 2)
             {
                 _pinching = false;
@@ -399,6 +441,7 @@
             else
             {
                 ApplyPinch(_panZoomRect);
+                ClampPanZoomToCanvas(_panZoomRect);
                 await RedrawAsync();
                 return;
             }
@@ -450,6 +493,9 @@
 
         _offsetX += dx;
         _offsetY += dy;
+
+        if (_panZoomRect is not null)
+            ClampPanZoomToCanvas(_panZoomRect);
 
         await RedrawAsync();
     }
@@ -704,6 +750,8 @@
         _scale = newScale;
         _offsetX = cx - (_pinchStartImageX * _scale);
         _offsetY = cy - (_pinchStartImageY * _scale);
+
+        ClampPanZoomToCanvas(rect);
     }
 
     private void CancelInertia()
@@ -719,6 +767,9 @@
     private Task StartInertiaAsync(double velocityX, double velocityY)
     {
         CancelInertia();
+
+        // Capture the last known canvas bounds for clamping during inertia.
+        var rect = _panZoomRect ?? _lastCanvasRect;
 
         _inertiaCts = new CancellationTokenSource();
         var ct = _inertiaCts.Token;
@@ -747,7 +798,12 @@
                 vy *= decay;
 
                 var speed = Math.Sqrt((vx * vx) + (vy * vy));
-                await InvokeAsync(RedrawAsync);
+                await InvokeAsync(async () =>
+                {
+                    if (rect is not null)
+                        ClampPanZoomToCanvas(rect);
+                    await RedrawAsync();
+                });
 
                 if (speed < _touchInertiaStopSpeed)
                     break;
@@ -769,5 +825,11 @@
         public double top { get; set; }
         public double width { get; set; }
         public double height { get; set; }
+    }
+
+    private sealed class ImageInfo
+    {
+        public int width { get; set; }
+        public int height { get; set; }
     }
 }
