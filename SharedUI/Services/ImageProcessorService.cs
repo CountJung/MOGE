@@ -781,6 +781,179 @@ public sealed class ImageProcessorService
         return full;
     }
 
+    public byte[] CreateConnectedSimilarColorMask(byte[] imageBytes, int startX, int startY, Rgba32 target, int tolerance)
+    {
+        tolerance = Math.Clamp(tolerance, 0, 255);
+
+        var (iw, ih) = GetSize(imageBytes);
+        if (iw <= 0 || ih <= 0)
+            throw new InvalidOperationException("Image size is unknown.");
+
+        startX = Math.Clamp(startX, 0, iw - 1);
+        startY = Math.Clamp(startY, 0, ih - 1);
+
+        var mask = new byte[iw * ih];
+
+        var r0 = Math.Max(0, target.R - tolerance);
+        var r1 = Math.Min(255, target.R + tolerance);
+        var g0 = Math.Max(0, target.G - tolerance);
+        var g1 = Math.Min(255, target.G + tolerance);
+        var b0 = Math.Max(0, target.B - tolerance);
+        var b1 = Math.Min(255, target.B + tolerance);
+
+        if (OperatingSystem.IsBrowser())
+        {
+            var raw = GetRawOrThrow(imageBytes);
+            FloodFillConnectedRgba(raw.RgbaBytes, iw, ih, startX, startY, r0, r1, g0, g1, b0, b1, mask);
+            return mask;
+        }
+
+        using var src = Decode(imageBytes);
+        using var bgra = src.Channels() == 4 ? src.Clone() : new Mat();
+        if (src.Channels() != 4)
+            Cv2.CvtColor(src, bgra, ColorConversionCodes.BGR2BGRA);
+
+        // Copy pixels out (OpenCV Mat may be non-contiguous depending on operations).
+        var pixels = new byte[iw * ih * 4];
+        if (bgra.IsContinuous())
+        {
+            Marshal.Copy(bgra.Data, pixels, 0, pixels.Length);
+        }
+        else
+        {
+            var rowBytes = iw * 4;
+            for (var y = 0; y < ih; y++)
+            {
+                var srcRow = bgra.Ptr(y);
+                Marshal.Copy(srcRow, pixels, y * rowBytes, rowBytes);
+            }
+        }
+
+        FloodFillConnectedBgra(pixels, iw, ih, startX, startY, r0, r1, g0, g1, b0, b1, mask);
+        return mask;
+    }
+
+    private static void FloodFillConnectedRgba(byte[] rgba, int width, int height, int sx, int sy,
+        int r0, int r1, int g0, int g1, int b0, int b1, byte[] mask)
+    {
+        var visited = new bool[width * height];
+        var stack = new int[width * height];
+        var sp = 0;
+        stack[sp++] = sy * width + sx;
+
+        while (sp > 0)
+        {
+            var idx = stack[--sp];
+            if (visited[idx])
+                continue;
+
+            visited[idx] = true;
+
+            var p = idx * 4;
+            var rr = rgba[p + 0];
+            var gg = rgba[p + 1];
+            var bb = rgba[p + 2];
+
+            if (rr < r0 || rr > r1 || gg < g0 || gg > g1 || bb < b0 || bb > b1)
+                continue;
+
+            mask[idx] = 255;
+
+            var x = idx % width;
+            var y = idx / width;
+
+            // 8-neighborhood
+            for (var dy = -1; dy <= 1; dy++)
+            for (var dx = -1; dx <= 1; dx++)
+            {
+                if (dx == 0 && dy == 0)
+                    continue;
+
+                var nx = x + dx;
+                var ny = y + dy;
+                if ((uint)nx >= (uint)width || (uint)ny >= (uint)height)
+                    continue;
+
+                var nidx = ny * width + nx;
+                if (!visited[nidx])
+                    stack[sp++] = nidx;
+            }
+        }
+    }
+
+    private static void FloodFillConnectedBgra(byte[] bgra, int width, int height, int sx, int sy,
+        int r0, int r1, int g0, int g1, int b0, int b1, byte[] mask)
+    {
+        var visited = new bool[width * height];
+        var stack = new int[width * height];
+        var sp = 0;
+        stack[sp++] = sy * width + sx;
+
+        while (sp > 0)
+        {
+            var idx = stack[--sp];
+            if (visited[idx])
+                continue;
+
+            visited[idx] = true;
+
+            var p = idx * 4;
+            var bb = bgra[p + 0];
+            var gg = bgra[p + 1];
+            var rr = bgra[p + 2];
+
+            if (rr < r0 || rr > r1 || gg < g0 || gg > g1 || bb < b0 || bb > b1)
+                continue;
+
+            mask[idx] = 255;
+
+            var x = idx % width;
+            var y = idx / width;
+
+            for (var dy = -1; dy <= 1; dy++)
+            for (var dx = -1; dx <= 1; dx++)
+            {
+                if (dx == 0 && dy == 0)
+                    continue;
+
+                var nx = x + dx;
+                var ny = y + dy;
+                if ((uint)nx >= (uint)width || (uint)ny >= (uint)height)
+                    continue;
+
+                var nidx = ny * width + nx;
+                if (!visited[nidx])
+                    stack[sp++] = nidx;
+            }
+        }
+    }
+
+    public Rgba32 GetPixelColor(byte[] imageBytes, int x, int y)
+    {
+        var (iw, ih) = GetSize(imageBytes);
+        if (iw <= 0 || ih <= 0)
+            throw new InvalidOperationException("Image size is unknown.");
+
+        x = Math.Clamp(x, 0, Math.Max(0, iw - 1));
+        y = Math.Clamp(y, 0, Math.Max(0, ih - 1));
+
+        if (OperatingSystem.IsBrowser())
+        {
+            var raw = GetRawOrThrow(imageBytes);
+            var i = (y * iw + x) * 4;
+            return new Rgba32(raw.RgbaBytes[i + 0], raw.RgbaBytes[i + 1], raw.RgbaBytes[i + 2], raw.RgbaBytes[i + 3]);
+        }
+
+        using var src = Decode(imageBytes);
+        using var bgra = src.Channels() == 4 ? src.Clone() : new Mat();
+        if (src.Channels() != 4)
+            Cv2.CvtColor(src, bgra, ColorConversionCodes.BGR2BGRA);
+
+        var v = bgra.At<Vec4b>(y, x);
+        // OpenCV BGRA -> RGBA
+        return new Rgba32(v.Item2, v.Item1, v.Item0, v.Item3);
+    }
+
     public byte[] FillByMask(byte[] imageBytes, byte[] mask, Rgba32 fillColor)
     {
         var (iw, ih) = GetSize(imageBytes);
@@ -824,7 +997,7 @@ public sealed class ImageProcessorService
         return EncodeForDisplay(merged);
     }
 
-    public byte[] DrawText(byte[] imageBytes, string text, int x, int y, Rgba32 color)
+    public byte[] DrawText(byte[] imageBytes, string text, int x, int y, Rgba32 color, double scale = 1.0, int thickness = 2)
     {
         if (string.IsNullOrWhiteSpace(text))
             return imageBytes;
@@ -836,12 +1009,17 @@ public sealed class ImageProcessorService
         x = Math.Clamp(x, 0, Math.Max(0, iw - 1));
         y = Math.Clamp(y, 0, Math.Max(0, ih - 1));
 
+        scale = Math.Clamp(scale, 0.5, 10.0);
+        thickness = Math.Clamp(thickness, 1, 10);
+
         if (OperatingSystem.IsBrowser())
         {
             // Minimal ASCII-only bitmap font fallback.
             var raw = GetRawOrThrow(imageBytes);
             var dst = raw.RgbaBytes.ToArray();
-            DrawAsciiText(dst, iw, ih, x, y, text, color);
+
+            var intScale = Math.Clamp((int)Math.Round(scale), 1, 10);
+            DrawAsciiText(dst, iw, ih, x, y, text, color, intScale, thickness);
             return ReturnToken(new RawRgbaImage(iw, ih, dst));
         }
 
@@ -851,11 +1029,11 @@ public sealed class ImageProcessorService
         using var alpha = split.Alpha?.Clone() ?? new Mat(work.Rows, work.Cols, MatType.CV_8UC1, Scalar.All(255));
 
         var bgr = new Scalar(color.B, color.G, color.R);
-        Cv2.PutText(work, text, new Point(x, y), HersheyFonts.HersheySimplex, 1.0, bgr, 2, LineTypes.AntiAlias);
+        Cv2.PutText(work, text, new Point(x, y), HersheyFonts.HersheySimplex, scale, bgr, thickness, LineTypes.AntiAlias);
         // Approximate alpha as opaque for the text region by drawing a mask in parallel.
         using (var tmp = new Mat(work.Rows, work.Cols, MatType.CV_8UC1, Scalar.All(0)))
         {
-            Cv2.PutText(tmp, text, new Point(x, y), HersheyFonts.HersheySimplex, 1.0, Scalar.All(255), 2, LineTypes.AntiAlias);
+            Cv2.PutText(tmp, text, new Point(x, y), HersheyFonts.HersheySimplex, scale, Scalar.All(255), thickness, LineTypes.AntiAlias);
             alpha.SetTo(Scalar.All(255), tmp);
         }
 
@@ -863,22 +1041,22 @@ public sealed class ImageProcessorService
         return EncodeForDisplay(merged);
     }
 
-    private static void DrawAsciiText(byte[] rgba, int width, int height, int x, int y, string text, Rgba32 color)
+    private static void DrawAsciiText(byte[] rgba, int width, int height, int x, int y, string text, Rgba32 color, int scale, int thickness)
     {
         // 5x7 font (very small); we only support basic ASCII 32..126.
-        // Each glyph is 7 bytes, LSB on the left.
+        // NOTE: glyph rows are encoded MSB-left (we read bit 4..0 for columns 0..4).
         foreach (var ch in text)
         {
             if (ch == '\n')
             {
-                y += 10;
+                y += 10 * Math.Max(1, scale);
                 x = 0;
                 continue;
             }
 
             if (ch < 32 || ch > 126)
             {
-                x += 6;
+                x += 6 * Math.Max(1, scale);
                 continue;
             }
 
@@ -886,28 +1064,54 @@ public sealed class ImageProcessorService
             for (var row = 0; row < 7; row++)
             {
                 var bits = glyph[row];
-                var yy = y + row;
-                if ((uint)yy >= (uint)height)
-                    continue;
+                var yy0 = y + (row * scale);
 
                 for (var col = 0; col < 5; col++)
                 {
-                    if (((bits >> col) & 1) == 0)
+                    if (((bits >> (4 - col)) & 1) == 0)
                         continue;
 
-                    var xx = x + col;
-                    if ((uint)xx >= (uint)width)
-                        continue;
+                    var xx0 = x + (col * scale);
 
-                    var idx = (yy * width + xx) * 4;
-                    rgba[idx + 0] = color.R;
-                    rgba[idx + 1] = color.G;
-                    rgba[idx + 2] = color.B;
-                    rgba[idx + 3] = 255;
+                    // Draw scaled "pixel" with simple thickness (square dilation).
+                    var radius = Math.Max(0, thickness - 1);
+                    for (var sy = 0; sy < scale; sy++)
+                    {
+                        var yy = yy0 + sy;
+                        if ((uint)yy >= (uint)height)
+                            continue;
+
+                        for (var sx = 0; sx < scale; sx++)
+                        {
+                            var xx = xx0 + sx;
+                            if ((uint)xx >= (uint)width)
+                                continue;
+
+                            for (var dy = -radius; dy <= radius; dy++)
+                            {
+                                var yyy = yy + dy;
+                                if ((uint)yyy >= (uint)height)
+                                    continue;
+
+                                for (var dx = -radius; dx <= radius; dx++)
+                                {
+                                    var xxx = xx + dx;
+                                    if ((uint)xxx >= (uint)width)
+                                        continue;
+
+                                    var idx = (yyy * width + xxx) * 4;
+                                    rgba[idx + 0] = color.R;
+                                    rgba[idx + 1] = color.G;
+                                    rgba[idx + 2] = color.B;
+                                    rgba[idx + 3] = 255;
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
-            x += 6;
+            x += 6 * Math.Max(1, scale);
         }
     }
 

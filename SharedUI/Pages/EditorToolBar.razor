@@ -1,9 +1,21 @@
 @using MudBlazor
 @using SharedUI.Components
 
-<MudPaper Elevation="1" Class="pa-2" Style="height: clamp(240px, 70vh, 720px); overflow:auto;">
+<MudPaper Elevation="1" Class="pa-2" Style="height: clamp(240px, 65vh, 680px); overflow:auto;">
     <MudStack Spacing="2">
         <MudText Typo="Typo.subtitle2">Tools</MudText>
+
+        <MudText Typo="Typo.caption">Colors</MudText>
+        <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Style="flex-wrap:wrap;">
+            <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                <MudText Typo="Typo.caption">FG</MudText>
+                <input type="color" value="@ForegroundColorHex" disabled="@(!HasImage)" style="height:32px; width:40px; padding:0; border:1px solid var(--mud-palette-lines-default); border-radius: var(--mud-default-borderradius); background:transparent;" @onchange="OnForegroundColorInput" />
+            </MudStack>
+            <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                <MudText Typo="Typo.caption">BG</MudText>
+                <input type="color" value="@BackgroundColorHex" disabled="@(!HasImage)" style="height:32px; width:40px; padding:0; border:1px solid var(--mud-palette-lines-default); border-radius: var(--mud-default-borderradius); background:transparent;" @onchange="OnBackgroundColorInput" />
+            </MudStack>
+        </MudStack>
 
         <MudStack Spacing="1">
             <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Style="flex-wrap:wrap;">
@@ -27,16 +39,16 @@
 
             <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Style="flex-wrap:wrap;">
                 <MudTooltip Text="Select similar colors (within selection rectangle)">
-                    <MudIconButton Icon="@Icons.Material.Filled.Colorize" Disabled="@(!HasImage)"
-                                   OnClick="@(async () => await SelectSimilarColors.InvokeAsync())" aria-label="Select similar colors" />
+                    <MudIconButton Icon="@Icons.Material.Filled.AutoAwesome" Color="@(IsMagicWand ? Color.Primary : Color.Inherit)" Disabled="@ToolDisabled"
+                                   OnClick="SelectMagicWand" aria-label="Tool: Magic Wand" />
                 </MudTooltip>
                 <MudTooltip Text="Fill selection with FG">
-                    <MudIconButton Icon="@Icons.Material.Filled.FormatColorFill" Disabled="@(!HasImage || !SelectionMode)"
+                    <MudIconButton Icon="@Icons.Material.Filled.FormatColorFill" Disabled="@(!CanFillSelection)"
                                    OnClick="@(async () => await FillSelection.InvokeAsync())" aria-label="Fill selection" />
                 </MudTooltip>
-                <MudTooltip Text="Apply text (placed inside selection rectangle)">
-                    <MudIconButton Icon="@Icons.Material.Filled.TextFields" Disabled="@(!HasImage || !SelectionMode || string.IsNullOrWhiteSpace(TextInput))"
-                                   OnClick="@(async () => await ApplyText.InvokeAsync())" aria-label="Apply text" />
+                <MudTooltip Text="Text tool">
+                    <MudIconButton Icon="@Icons.Material.Filled.TextFields" Color="@(IsTextTool ? Color.Primary : Color.Inherit)" Disabled="@ToolDisabled"
+                                   OnClick="SelectTextTool" aria-label="Tool: Text" />
                 </MudTooltip>
                 <MudTooltip Text="Apply blur to selection">
                     <MudIconButton Icon="@Icons.Material.Filled.BlurOn" Disabled="@(!HasImage || !SelectionMode)"
@@ -49,7 +61,7 @@
             </MudStack>
         </MudStack>
 
-        @if (!IsPanZoom && !IsSelection)
+        @if (IsBrush || IsEraser)
         {
             <MudDivider />
             <MudText Typo="Typo.subtitle2">Brush / Eraser</MudText>
@@ -57,17 +69,23 @@
             <MudText Typo="Typo.caption">Brush Size</MudText>
             <MudSlider T="int" Value="@BrushRadius" ValueChanged="BrushRadiusChanged" Min="1" Max="64" Step="1" Color="Color.Primary" Disabled="@(!HasImage || PerspectiveMode || CropMode)" />
 
-            <MudText Typo="Typo.caption">Colors</MudText>
-            <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Style="flex-wrap:wrap;">
-                <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
-                    <MudText Typo="Typo.caption">FG</MudText>
-                    <input type="color" value="@ForegroundColorHex" disabled="@(!HasImage)" style="height:32px; width:40px; padding:0; border:1px solid var(--mud-palette-lines-default); border-radius: var(--mud-default-borderradius); background:transparent;" @onchange="OnForegroundColorInput" />
-                </MudStack>
-                <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
-                    <MudText Typo="Typo.caption">BG</MudText>
-                    <input type="color" value="@BackgroundColorHex" disabled="@(!HasImage)" style="height:32px; width:40px; padding:0; border:1px solid var(--mud-palette-lines-default); border-radius: var(--mud-default-borderradius); background:transparent;" @onchange="OnBackgroundColorInput" />
-                </MudStack>
-            </MudStack>
+        }
+
+        @if (IsMagicWand)
+        {
+            <MudDivider />
+            <MudText Typo="Typo.subtitle2">Magic Wand</MudText>
+            <MudText Typo="Typo.caption">Click on the canvas to pick a color.</MudText>
+
+            <MudText Typo="Typo.caption">Range (tolerance)</MudText>
+            <MudSlider T="int" Value="@MagicWandTolerance" ValueChanged="MagicWandToleranceChanged" Min="0" Max="255" Step="1" Color="Color.Primary" Disabled="@(!HasImage)" />
+        }
+
+        @if (IsTextTool)
+        {
+            <MudDivider />
+            <MudText Typo="Typo.subtitle2">Text</MudText>
+            <MudText Typo="Typo.caption">Click on the canvas to place the text.</MudText>
         }
 
         @if (PerspectiveMode)
@@ -96,5 +114,11 @@
 
         <MudText Typo="Typo.caption">Text</MudText>
         <MudTextField T="string" Value="@TextInput" ValueChanged="TextInputChanged" Placeholder="Text" Disabled="@(!HasImage)" Immediate="true" />
+
+        <MudText Typo="Typo.caption">Text size</MudText>
+        <MudSlider T="int" Value="@TextSize" ValueChanged="TextSizeChanged" Min="1" Max="8" Step="1" Color="Color.Primary" Disabled="@(!HasImage)" />
+
+        <MudText Typo="Typo.caption">Text thickness</MudText>
+        <MudSlider T="int" Value="@TextThickness" ValueChanged="TextThicknessChanged" Min="1" Max="6" Step="1" Color="Color.Primary" Disabled="@(!HasImage)" />
     </MudStack>
 </MudPaper>

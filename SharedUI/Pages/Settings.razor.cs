@@ -5,7 +5,7 @@ namespace SharedUI.Pages;
 public partial class Settings
 {
     protected override SettingsViewModel CreateViewModel()
-        => new(SettingsService, Nav);
+        => new(SettingsService, Nav, Js);
 
     protected override async Task OnInitializedAsync()
     {

@@ -4,15 +4,37 @@
 @using SharedUI.Services.Settings
 @implements IDisposable
 
-<MudPaper Elevation="1" Class="pa-2" Style="height: clamp(320px, 70vh, 720px);">
+<MudPaper Elevation="1" Class="pa-2" Style="height: clamp(320px, 65vh, 680px);">
     <div style="position:relative; width:100%; height:100%;">
-        <canvas @ref="_canvas" draggable="false" style="width:100%; height:100%; touch-action:none; display:block; user-select:none; -webkit-user-select:none; -webkit-user-drag:none;"
+        <canvas @ref="_canvas" draggable="false" style="width:100%; height:100%; touch-action:none; display:block; user-select:none; -webkit-user-select:none; -webkit-user-drag:none; cursor:@GetCanvasCursorCss();"
             @onwheel="OnWheel" @onwheel:preventDefault="true" @onwheel:stopPropagation="true"
             @onpointerdown="OnPointerDown" @onpointerdown:preventDefault="true"
             @onpointermove="OnPointerMove" @onpointermove:preventDefault="true"
             @onpointerup="OnPointerUp" @onpointerup:preventDefault="true"
             @onpointerleave="OnPointerUp">
         </canvas>
+
+        @if (ShowOverlayPolygon && OverlayPolygonPoints is { Count: > 2 })
+        {
+            var pts = new System.Text.StringBuilder(capacity: OverlayPolygonPoints.Count * 16);
+            for (var i = 0; i < OverlayPolygonPoints.Count; i++)
+            {
+                var p = OverlayPolygonPoints[i];
+                var sx = _offsetX + (p.X * _scale);
+                var sy = _offsetY + (p.Y * _scale);
+                if (i > 0)
+                    pts.Append(' ');
+                pts.Append(sx.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
+                pts.Append(',');
+                pts.Append(sy.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
+            }
+
+            var dash = OverlayPolygonDashed ? "6 4" : null;
+
+            <svg style="position:absolute; inset:0; width:100%; height:100%; pointer-events:none; overflow:visible;">
+                <polygon points="@pts.ToString()" fill="none" stroke="var(--mud-palette-primary)" stroke-width="2" stroke-dasharray="@dash" />
+            </svg>
+        }
 
         @if (ShowOverlayRectangle && OverlayHandles is { Count: >= 2 })
         {
@@ -96,6 +118,12 @@
     [Parameter] public bool OverlayDashed { get; set; }
     [Parameter] public IReadOnlyList<CanvasPoint>? OverlayHandles { get; set; }
 
+    [Parameter] public bool ShowOverlayPolygon { get; set; }
+    [Parameter] public bool OverlayPolygonDashed { get; set; }
+    [Parameter] public IReadOnlyList<CanvasPoint>? OverlayPolygonPoints { get; set; }
+
+    [Parameter] public EventCallback<CanvasPoint> CanvasClicked { get; set; }
+
     [Parameter] public EventCallback<ElementReference> CanvasReady { get; set; }
 
     private ElementReference _canvas;
@@ -137,6 +165,11 @@
     private bool _drawing;
     private readonly List<CanvasPoint> _strokePoints = new();
     private DomRect? _strokeRect;
+
+    private bool _clickCandidate;
+    private DomRect? _clickRect;
+    private double _clickDownClientX;
+    private double _clickDownClientY;
 
     private int? _dragHandleIndex;
     private DomRect? _cachedRect;
@@ -291,7 +324,19 @@
         // Track active pointers for pinch zoom (touch).
         _activePointers[e.PointerId] = (e.ClientX, e.ClientY);
 
-        if (InteractionMode == CanvasInteractionMode.PanZoom && _dragHandleIndex is null)
+        if (_dragHandleIndex is not null)
+            return;
+
+        if (InteractionMode is CanvasInteractionMode.MagicWand or CanvasInteractionMode.Text)
+        {
+            _clickCandidate = true;
+            _clickDownClientX = e.ClientX;
+            _clickDownClientY = e.ClientY;
+            _clickRect = await Js.InvokeAsync<DomRect>("mogeCanvas.getRect", _canvas);
+            return;
+        }
+
+        if (InteractionMode == CanvasInteractionMode.PanZoom)
         {
             if (_activePointers.Count >= 2)
             {
@@ -303,10 +348,7 @@
             }
         }
 
-        if (_dragHandleIndex is not null)
-            return;
-
-        if (InteractionMode != CanvasInteractionMode.PanZoom)
+        if (InteractionMode is CanvasInteractionMode.Brush or CanvasInteractionMode.Eraser)
         {
             _drawing = true;
             _strokePoints.Clear();
@@ -331,6 +373,19 @@
     {
         if (_activePointers.ContainsKey(e.PointerId))
             _activePointers[e.PointerId] = (e.ClientX, e.ClientY);
+
+        if (_clickCandidate)
+        {
+            var cdx = e.ClientX - _clickDownClientX;
+            var cdy = e.ClientY - _clickDownClientY;
+            if ((cdx * cdx) + (cdy * cdy) > (6 * 6))
+            {
+                _clickCandidate = false;
+                _clickRect = null;
+            }
+
+            return;
+        }
 
         if (_pinching)
         {
@@ -403,6 +458,26 @@
     {
         _activePointers.Remove(e.PointerId);
 
+        if (_clickCandidate)
+        {
+            _clickCandidate = false;
+
+            var rect = _clickRect ?? await Js.InvokeAsync<DomRect>("mogeCanvas.getRect", _canvas);
+            _clickRect = null;
+
+            if (CanvasClicked.HasDelegate)
+            {
+                var p = ClientToImagePoint(e.ClientX, e.ClientY, rect);
+                await CanvasClicked.InvokeAsync(p);
+            }
+
+            _panning = false;
+            _dragHandleIndex = null;
+            _cachedRect = null;
+            _panZoomRect = null;
+            return;
+        }
+
         if (_drawing)
         {
             _drawing = false;
@@ -459,6 +534,19 @@
         _cachedRect = null;
         _panZoomRect = null;
         await Task.CompletedTask;
+    }
+
+    private string GetCanvasCursorCss()
+    {
+        return InteractionMode switch
+        {
+            CanvasInteractionMode.PanZoom => "grab",
+            CanvasInteractionMode.Brush => "crosshair",
+            CanvasInteractionMode.Eraser => "crosshair",
+            CanvasInteractionMode.MagicWand => "crosshair",
+            CanvasInteractionMode.Text => "text",
+            _ => "default"
+        };
     }
 
     private CanvasPoint ClientToImagePoint(double clientX, double clientY, DomRect rect)

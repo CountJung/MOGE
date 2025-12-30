@@ -6,12 +6,13 @@
 
 @inject AppSettingsService SettingsService
 @inject NavigationManager Nav
+@inject IJSRuntime Js
 
 <MudPaper Class="pa-4" Elevation="1">
     <MudStack Spacing="3">
         <MudStack Row="true" AlignItems="AlignItems.Center" Justify="Justify.SpaceBetween">
             <MudText Typo="Typo.h5">Settings</MudText>
-            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack" OnClick="@(() => Vm!.GoBack())">Editor</MudButton>
+            <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack" OnClick="Vm!.GoBackAsync">Editor</MudButton>
         </MudStack>
 
         <MudDivider />

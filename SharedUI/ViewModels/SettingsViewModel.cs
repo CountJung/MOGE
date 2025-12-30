@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Components;
+using Microsoft.JSInterop;
 using SharedUI.Mvvm;
 using SharedUI.Services.Settings;
 
@@ -8,6 +9,7 @@ public sealed class SettingsViewModel : ObservableObject, IDisposable
 {
     private readonly AppSettingsService _settingsService;
     private readonly NavigationManager _nav;
+    private readonly IJSRuntime _js;
 
     private AppThemeMode _theme;
 
@@ -20,10 +22,11 @@ public sealed class SettingsViewModel : ObservableObject, IDisposable
     private double _touchInertiaStopSpeed;
     private double _touchInertiaDecayPer16ms;
 
-    public SettingsViewModel(AppSettingsService settingsService, NavigationManager nav)
+    public SettingsViewModel(AppSettingsService settingsService, NavigationManager nav, IJSRuntime js)
     {
         _settingsService = settingsService;
         _nav = nav;
+        _js = js;
     }
 
     public AppThemeMode Theme => _theme;
@@ -104,7 +107,18 @@ public sealed class SettingsViewModel : ObservableObject, IDisposable
     public Task OnTouchInertiaDecayChanged(double v)
         => _settingsService.UpdateAsync(s => s with { TouchInertiaDecayPer16ms = Math.Clamp(v, 0.80, 0.99) });
 
-    public void GoBack() => _nav.NavigateTo("/");
+    public async Task GoBackAsync()
+    {
+        try
+        {
+            await _js.InvokeVoidAsync("history.back");
+        }
+        catch
+        {
+            // Fallback when history isn't available (e.g., direct landing).
+            _nav.NavigateTo("");
+        }
+    }
 
     public void Dispose()
     {

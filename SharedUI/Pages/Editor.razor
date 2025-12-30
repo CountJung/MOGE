@@ -57,6 +57,8 @@
                        InteractionModeChanged="Vm!.OnInteractionModeChanged"
                        BrushRadius="@Vm!.BrushRadius"
                        BrushRadiusChanged="Vm!.OnBrushRadiusChanged"
+                       MagicWandTolerance="@Vm!.MagicWandTolerance"
+                       MagicWandToleranceChanged="Vm!.OnMagicWandToleranceChanged"
                        ForegroundColorHex="@Vm!.ForegroundColorHex"
                        ForegroundColorHexChanged="Vm!.OnForegroundColorHexChanged"
                        BackgroundColorHex="@Vm!.BackgroundColorHex"
@@ -69,11 +71,14 @@
                        SharpenAmountChanged="Vm!.OnSelectionSharpenAmountChanged"
                        ApplySelectionBlur="Vm!.ApplySelectionBlurAsync"
                        ApplySelectionSharpen="Vm!.ApplySelectionSharpenAsync"
-                       SelectSimilarColors="Vm!.SelectSimilarColorsAsync"
                        FillSelection="Vm!.FillSelectionAsync"
+                       CanFillSelection="@Vm!.CanFillSelection"
                        TextInput="@Vm!.TextInput"
                        TextInputChanged="Vm!.OnTextInputChanged"
-                       ApplyText="Vm!.ApplyTextAsync" />
+                       TextSize="@Vm!.TextSize"
+                       TextSizeChanged="Vm!.OnTextSizeChanged"
+                       TextThickness="@Vm!.TextThickness"
+                       TextThicknessChanged="Vm!.OnTextThicknessChanged" />
     </MudItem>
 
     <MudItem xs="12" md="7" lg="8">
@@ -82,17 +87,18 @@
                     HandlesAsRectangle="@(Vm!.CropMode || Vm!.SelectionMode)"
                     Handles="@Vm!.Handles"
                     HandlesChanged="Vm!.OnHandlesChanged"
-                    ShowOverlayRectangle="@Vm!.HasSelectionPreview"
-                    OverlayDashed="true"
-                    OverlayHandles="@Vm!.SelectionPreviewHandles"
+                    ShowOverlayPolygon="@Vm!.HasSelectionPreviewPolygon"
+                    OverlayPolygonDashed="true"
+                    OverlayPolygonPoints="@Vm!.SelectionPreviewPolygonPoints"
                     InteractionMode="@((Vm!.PerspectiveMode || Vm!.CropMode || Vm!.SelectionMode) ? CanvasInteractionMode.PanZoom : Vm!.InteractionMode)"
                     BrushRadius="@Vm!.BrushRadius"
                     CanvasReady="Vm!.OnCanvasReady"
-                    StrokeCommitted="Vm!.OnStrokeCommittedAsync" />
+                    StrokeCommitted="Vm!.OnStrokeCommittedAsync"
+                    CanvasClicked="Vm!.OnCanvasClickedAsync" />
     </MudItem>
 
     <MudItem xs="12" md="2" lg="2">
-        <MudPaper Elevation="1" Class="pa-2" Style="height: clamp(240px, 70vh, 720px); overflow:auto;">
+        <MudPaper Elevation="1" Class="pa-2" Style="height: clamp(240px, 65vh, 680px); overflow:auto;">
             <EditorRightPanel
                 HasImage="@Vm!.HasImage"
                 PerspectiveMode="@Vm!.PerspectiveMode"

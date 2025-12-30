@@ -34,12 +34,21 @@ public partial class EditorToolBar
     [Parameter] public string BackgroundColorHex { get; set; } = "#ffffff";
     [Parameter] public EventCallback<string> BackgroundColorHexChanged { get; set; }
 
-    [Parameter] public EventCallback SelectSimilarColors { get; set; }
     [Parameter] public EventCallback FillSelection { get; set; }
+
+    [Parameter] public bool CanFillSelection { get; set; }
 
     [Parameter] public string TextInput { get; set; } = string.Empty;
     [Parameter] public EventCallback<string> TextInputChanged { get; set; }
-    [Parameter] public EventCallback ApplyText { get; set; }
+
+    [Parameter] public int TextSize { get; set; } = 1;
+    [Parameter] public EventCallback<int> TextSizeChanged { get; set; }
+
+    [Parameter] public int TextThickness { get; set; } = 2;
+    [Parameter] public EventCallback<int> TextThicknessChanged { get; set; }
+
+    [Parameter] public int MagicWandTolerance { get; set; }
+    [Parameter] public EventCallback<int> MagicWandToleranceChanged { get; set; }
 
     private bool ToolDisabled => !HasImage || PerspectiveMode || CropMode;
 
@@ -47,6 +56,8 @@ public partial class EditorToolBar
     private bool IsPanZoom => !SelectionMode && InteractionMode == CanvasInteractionMode.PanZoom;
     private bool IsBrush => !SelectionMode && InteractionMode == CanvasInteractionMode.Brush;
     private bool IsEraser => !SelectionMode && InteractionMode == CanvasInteractionMode.Eraser;
+    private bool IsMagicWand => !SelectionMode && InteractionMode == CanvasInteractionMode.MagicWand;
+    private bool IsTextTool => !SelectionMode && InteractionMode == CanvasInteractionMode.Text;
 
     private async Task SelectPanZoom()
     {
@@ -68,6 +79,28 @@ public partial class EditorToolBar
             await SelectionModeChanged.InvokeAsync(false);
 
         await InteractionModeChanged.InvokeAsync(CanvasInteractionMode.Brush);
+    }
+
+    private async Task SelectMagicWand()
+    {
+        if (ToolDisabled)
+            return;
+
+        if (SelectionMode)
+            await SelectionModeChanged.InvokeAsync(false);
+
+        await InteractionModeChanged.InvokeAsync(CanvasInteractionMode.MagicWand);
+    }
+
+    private async Task SelectTextTool()
+    {
+        if (ToolDisabled)
+            return;
+
+        if (SelectionMode)
+            await SelectionModeChanged.InvokeAsync(false);
+
+        await InteractionModeChanged.InvokeAsync(CanvasInteractionMode.Text);
     }
 
     private async Task SelectEraser()

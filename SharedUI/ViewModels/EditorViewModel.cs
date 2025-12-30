@@ -36,11 +36,19 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
     private CanvasInteractionMode _interactionMode = CanvasInteractionMode.PanZoom;
     private int _brushRadius = 8;
 
+    private int _magicWandTolerance = 30;
+    private (int X, int Y)? _magicWandLastPoint;
+    private Rgba32? _magicWandLastTarget;
+    private CancellationTokenSource? _magicWandDebounceCts;
+
     private string _foregroundColorHex = "#000000";
     private string _backgroundColorHex = "#ffffff";
     private string _textInput = string.Empty;
+    private int _textSize = 1;
+    private int _textThickness = 2;
     private byte[]? _selectionMask;
     private List<CanvasPoint> _selectionPreviewHandles = new();
+    private List<CanvasPoint> _selectionPreviewPolygonPoints = new();
 
     private int _selectionBlurKernelSize;
     private double _selectionSharpenAmount = 1.0;
@@ -89,13 +97,23 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
     public CanvasInteractionMode InteractionMode => _interactionMode;
     public int BrushRadius => _brushRadius;
 
+    public int MagicWandTolerance => _magicWandTolerance;
+
     public string ForegroundColorHex => _foregroundColorHex;
     public string BackgroundColorHex => _backgroundColorHex;
 
     public string TextInput => _textInput;
 
+    public int TextSize => _textSize;
+    public int TextThickness => _textThickness;
+
     public bool HasSelectionPreview => _selectionPreviewHandles.Count == 4;
     public IReadOnlyList<CanvasPoint> SelectionPreviewHandles => _selectionPreviewHandles;
+
+    public bool HasSelectionPreviewPolygon => _selectionPreviewPolygonPoints.Count > 2;
+    public IReadOnlyList<CanvasPoint> SelectionPreviewPolygonPoints => _selectionPreviewPolygonPoints;
+
+    public bool CanFillSelection => HasImage && (_selectionMode || _selectionMask is { Length: > 0 });
 
     public IReadOnlyList<CanvasPoint> Handles => _handles;
 
@@ -452,10 +470,173 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         if (mode != CanvasInteractionMode.PanZoom)
             _selectionMask = null;
 
+        if (mode != CanvasInteractionMode.MagicWand)
+        {
+            _selectionPreviewHandles = new();
+            _selectionPreviewPolygonPoints = new();
+            _magicWandLastPoint = null;
+            _magicWandLastTarget = null;
+        }
+
         _status = mode == CanvasInteractionMode.PanZoom ? null : $"Tool: {mode}";
         RefreshFooter();
         NotifyAll();
         return Task.CompletedTask;
+    }
+
+    public Task OnMagicWandToleranceChanged(int v)
+    {
+        _magicWandTolerance = Math.Clamp(v, 0, 255);
+        NotifyAll();
+
+        if (_interactionMode == CanvasInteractionMode.MagicWand && _magicWandLastPoint is not null)
+            _ = RecomputeMagicWandSelectionDebouncedAsync();
+
+        return Task.CompletedTask;
+    }
+
+    public async Task OnCanvasClickedAsync(CanvasPoint p)
+    {
+        if (!HasImage)
+            return;
+
+        var x = (int)Math.Round(p.X);
+        var y = (int)Math.Round(p.Y);
+
+        x = Math.Clamp(x, 0, Math.Max(0, _imageWidth - 1));
+        y = Math.Clamp(y, 0, Math.Max(0, _imageHeight - 1));
+
+        if (_interactionMode == CanvasInteractionMode.MagicWand)
+        {
+            await RunMagicWandAtAsync(x, y, targetOverride: null, CancellationToken.None);
+            return;
+        }
+
+        if (_interactionMode == CanvasInteractionMode.Text)
+        {
+            await ApplyTextAtAsync(x, y);
+            return;
+        }
+    }
+
+    private async Task RecomputeMagicWandSelectionDebouncedAsync()
+    {
+        _magicWandDebounceCts?.Cancel();
+        _magicWandDebounceCts?.Dispose();
+
+        var cts = new CancellationTokenSource();
+        _magicWandDebounceCts = cts;
+
+        try
+        {
+            await Task.Delay(150, cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        if (_magicWandLastPoint is null)
+            return;
+
+        await RunMagicWandAtAsync(_magicWandLastPoint.Value.X, _magicWandLastPoint.Value.Y, targetOverride: _magicWandLastTarget, cts.Token);
+    }
+
+    private async Task RunMagicWandAtAsync(int x, int y, Rgba32? targetOverride, CancellationToken ct)
+    {
+        if (!HasImage)
+            return;
+
+        var baseBytes = CurrentBytes;
+        if (baseBytes is null)
+            return;
+
+        var target = targetOverride ?? _imageProcessor.GetPixelColor(baseBytes, x, y);
+
+        _magicWandLastPoint = (x, y);
+        _magicWandLastTarget = target;
+
+        _status = "Magic wand: selecting...";
+        RefreshFooter();
+        NotifyAll();
+
+        try
+        {
+            var iw = Math.Max(1, _imageWidth);
+            var ih = Math.Max(1, _imageHeight);
+
+            var mask = await Task.Run(
+                () => _imageProcessor.CreateConnectedSimilarColorMask(baseBytes, x, y, target, tolerance: _magicWandTolerance),
+                ct);
+
+            if (ct.IsCancellationRequested)
+                return;
+
+            _selectionMask = mask;
+            _selectionPreviewHandles = ComputeMaskBoundingRectHandles(mask, _imageWidth, _imageHeight);
+            _selectionPreviewPolygonPoints = ComputeMaskOutlinePolygonPoints(mask, _imageWidth, _imageHeight);
+            _status = "Magic wand: selected";
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+        catch (Exception ex)
+        {
+            _status = ex.Message;
+            _selectionMask = null;
+            _selectionPreviewHandles = new();
+            _selectionPreviewPolygonPoints = new();
+            _selectionPreviewPolygonPoints = new();
+        }
+
+        RefreshFooter();
+        NotifyAll();
+    }
+
+    private async Task ApplyTextAtAsync(int x, int y)
+    {
+        if (!HasImage)
+            return;
+
+        if (string.IsNullOrWhiteSpace(_textInput))
+        {
+            _status = "Text is empty";
+            RefreshFooter();
+            NotifyAll();
+            return;
+        }
+
+        var baseBytes = CurrentBytes;
+        if (baseBytes is null)
+            return;
+
+        var color = Rgba32.FromHexOrDefault(_foregroundColorHex, new Rgba32(0, 0, 0, 255));
+
+        _status = "Applying text...";
+        RefreshFooter();
+        NotifyAll();
+
+        byte[] next;
+        try
+        {
+            var scale = (double)Math.Clamp(_textSize, 1, 8);
+            var thickness = Math.Clamp(_textThickness, 1, 6);
+            next = await Task.Run(() => _imageProcessor.DrawText(baseBytes, _textInput, x, y, color, scale, thickness));
+        }
+        catch (Exception ex)
+        {
+            _status = ex.Message;
+            RefreshFooter();
+            NotifyAll();
+            return;
+        }
+
+        CommitHistory(next, "Text", preserveHandles: true);
+        _status = "Text applied";
+        RefreshFooter();
+        NotifyAll();
+        await ApplyPipelineDebouncedAsync();
     }
 
     public Task OnBrushRadiusChanged(int radius)
@@ -488,6 +669,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         _handles = updated.ToList();
         _selectionMask = null;
         _selectionPreviewHandles = new();
+        _selectionPreviewPolygonPoints = new();
         NotifyAll();
         return Task.CompletedTask;
     }
@@ -509,6 +691,20 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
     public Task OnTextInputChanged(string text)
     {
         _textInput = text ?? string.Empty;
+        NotifyAll();
+        return Task.CompletedTask;
+    }
+
+    public Task OnTextSizeChanged(int size)
+    {
+        _textSize = Math.Clamp(size, 1, 8);
+        NotifyAll();
+        return Task.CompletedTask;
+    }
+
+    public Task OnTextThicknessChanged(int thickness)
+    {
+        _textThickness = Math.Clamp(thickness, 1, 6);
         NotifyAll();
         return Task.CompletedTask;
     }
@@ -551,13 +747,16 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
 
         try
         {
-            // Fixed tolerance for MVP.
-            _selectionMask = _imageProcessor.CreateSimilarColorMask(CurrentBytes!, x0, y0, w, h, target, tolerance: 30);
+            _selectionMask = _imageProcessor.CreateSimilarColorMask(CurrentBytes!, x0, y0, w, h, target, tolerance: _magicWandTolerance);
 
             // When not in selection mode, show a dashed preview rectangle (bounding box of the mask).
             _selectionPreviewHandles = _selectionMode
                 ? new()
                 : ComputeMaskBoundingRectHandles(_selectionMask, _imageWidth, _imageHeight);
+
+            _selectionPreviewPolygonPoints = _selectionMode
+                ? new()
+                : ComputeMaskOutlinePolygonPoints(_selectionMask, _imageWidth, _imageHeight);
 
             _status = "Similar colors selected";
         }
@@ -565,6 +764,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         {
             _status = ex.Message;
             _selectionPreviewHandles = new();
+            _selectionPreviewPolygonPoints = new();
         }
 
         RefreshFooter();
@@ -574,31 +774,37 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
 
     public async Task FillSelectionAsync()
     {
-        if (!HasImage || !_selectionMode)
-            return;
-
-        if (_handles.Count != 4)
-        {
-            _status = "Selection: expected 4 points";
-            RefreshFooter();
-            NotifyAll();
-            return;
-        }
-
-        var (x0, y0, w, h) = GetHandlesRect();
         var fill = Rgba32.FromHexOrDefault(_foregroundColorHex, new Rgba32(0, 0, 0, 255));
 
         var mask = _selectionMask;
-        if (mask is null)
+
+        if (_selectionMode)
         {
-            // Fill the whole selection rectangle.
-            mask = new byte[_imageWidth * _imageHeight];
-            for (var yy = y0; yy < y0 + h; yy++)
+            if (_handles.Count != 4)
             {
-                var row = yy * _imageWidth;
-                for (var xx = x0; xx < x0 + w; xx++)
-                    mask[row + xx] = 255;
+                _status = "Selection: expected 4 points";
+                RefreshFooter();
+                NotifyAll();
+                return;
             }
+
+            if (mask is null)
+            {
+                // Fill the whole selection rectangle.
+                var (x0, y0, w, h) = GetHandlesRect();
+                mask = new byte[_imageWidth * _imageHeight];
+                for (var yy = y0; yy < y0 + h; yy++)
+                {
+                    var row = yy * _imageWidth;
+                    for (var xx = x0; xx < x0 + w; xx++)
+                        mask[row + xx] = 255;
+                }
+            }
+        }
+        else
+        {
+            if (mask is null || mask.Length != _imageWidth * _imageHeight)
+                return;
         }
 
         _status = "Filling selection...";
@@ -657,7 +863,9 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         byte[] next;
         try
         {
-            next = await Task.Run(() => _imageProcessor.DrawText(baseBytes, _textInput, tx, ty, color));
+            var scale = (double)Math.Clamp(_textSize, 1, 8);
+            var thickness = Math.Clamp(_textThickness, 1, 6);
+            next = await Task.Run(() => _imageProcessor.DrawText(baseBytes, _textInput, tx, ty, color, scale, thickness));
         }
         catch (Exception ex)
         {
@@ -870,6 +1078,118 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
             new(left, bottom)
         };
     }
+
+    private static List<CanvasPoint> ComputeMaskOutlinePolygonPoints(byte[]? mask, int width, int height)
+    {
+        if (mask is null || mask.Length == 0 || width <= 0 || height <= 0)
+            return new();
+
+        if (mask.Length != width * height)
+            return new();
+
+        var segments = new List<(IntPoint A, IntPoint B)>(capacity: 2048);
+
+        for (var y = 0; y < height; y++)
+        {
+            var row = y * width;
+            for (var x = 0; x < width; x++)
+            {
+                if (mask[row + x] == 0)
+                    continue;
+
+                var hasTop = y > 0 && mask[(y - 1) * width + x] != 0;
+                var hasRight = x < width - 1 && mask[row + (x + 1)] != 0;
+                var hasBottom = y < height - 1 && mask[(y + 1) * width + x] != 0;
+                var hasLeft = x > 0 && mask[row + (x - 1)] != 0;
+
+                // pixel square boundary on integer grid; clockwise segments
+                if (!hasTop)
+                    segments.Add((new IntPoint(x, y), new IntPoint(x + 1, y)));
+                if (!hasRight)
+                    segments.Add((new IntPoint(x + 1, y), new IntPoint(x + 1, y + 1)));
+                if (!hasBottom)
+                    segments.Add((new IntPoint(x + 1, y + 1), new IntPoint(x, y + 1)));
+                if (!hasLeft)
+                    segments.Add((new IntPoint(x, y + 1), new IntPoint(x, y)));
+            }
+        }
+
+        if (segments.Count == 0)
+            return new();
+
+        var outgoing = new Dictionary<IntPoint, List<IntPoint>>(capacity: segments.Count);
+        var unused = new HashSet<Seg>(capacity: segments.Count);
+
+        foreach (var (a, b) in segments)
+        {
+            if (!outgoing.TryGetValue(a, out var list))
+            {
+                list = new List<IntPoint>(1);
+                outgoing[a] = list;
+            }
+
+            list.Add(b);
+            unused.Add(new Seg(a, b));
+        }
+
+        List<IntPoint>? best = null;
+
+        foreach (var s in unused.ToArray())
+        {
+            if (!unused.Contains(s))
+                continue;
+
+            var start = s.A;
+            var loop = new List<IntPoint>(capacity: 256) { s.A, s.B };
+            unused.Remove(s);
+
+            var next = s.B;
+            var guard = 0;
+            while (!next.Equals(start) && guard++ < 1_000_000)
+            {
+                if (!outgoing.TryGetValue(next, out var outs) || outs.Count == 0)
+                    break;
+
+                Seg? found = null;
+                for (var i = 0; i < outs.Count; i++)
+                {
+                    var cand = new Seg(next, outs[i]);
+                    if (unused.Contains(cand))
+                    {
+                        found = cand;
+                        break;
+                    }
+                }
+
+                if (found is null)
+                    break;
+
+                unused.Remove(found.Value);
+                next = found.Value.B;
+                loop.Add(next);
+            }
+
+            if (loop.Count >= 4 && loop[^1].Equals(start))
+            {
+                if (best is null || loop.Count > best.Count)
+                    best = loop;
+            }
+        }
+
+        if (best is null)
+            return new();
+
+        if (best.Count > 1 && best[^1].Equals(best[0]))
+            best.RemoveAt(best.Count - 1);
+
+        var result = new List<CanvasPoint>(best.Count);
+        for (var i = 0; i < best.Count; i++)
+            result.Add(new CanvasPoint(best[i].X, best[i].Y));
+        return result;
+    }
+
+    private readonly record struct IntPoint(int X, int Y);
+    private readonly record struct Seg(IntPoint A, IntPoint B);
 
     public async Task ApplyCropAsync()
     {
@@ -1217,5 +1537,9 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         _debounceCts?.Cancel();
         _debounceCts?.Dispose();
         _debounceCts = null;
+
+        _magicWandDebounceCts?.Cancel();
+        _magicWandDebounceCts?.Dispose();
+        _magicWandDebounceCts = null;
     }
 }
