@@ -5,7 +5,9 @@
     window.mogeCanvas &&
     typeof window.mogeCanvas.setRawRgba === 'function' &&
     typeof window.mogeCanvas.exportPngBase64 === 'function' &&
-    typeof window.mogeCanvas.downloadPng === 'function'
+    typeof window.mogeCanvas.downloadPng === 'function' &&
+    typeof window.mogeCanvas.exportJpegBase64 === 'function' &&
+    typeof window.mogeCanvas.downloadJpeg === 'function'
   ) return;
 
   const canvasToImage = new WeakMap();
@@ -20,6 +22,20 @@
 
     if (typeof sourceCanvas.toBlob === 'function') {
       return await new Promise((resolve) => sourceCanvas.toBlob(resolve, 'image/png'));
+    }
+
+    return null;
+  }
+
+  async function canvasToJpegBlob(sourceCanvas) {
+    if (!sourceCanvas) return null;
+
+    if (typeof OffscreenCanvas !== 'undefined' && sourceCanvas instanceof OffscreenCanvas) {
+      return await sourceCanvas.convertToBlob({ type: 'image/jpeg', quality: 0.92 });
+    }
+
+    if (typeof sourceCanvas.toBlob === 'function') {
+      return await new Promise((resolve) => sourceCanvas.toBlob(resolve, 'image/jpeg', 0.92));
     }
 
     return null;
@@ -173,6 +189,35 @@
       return await blobToBase64(blob);
     },
 
+    exportJpegBase64: async (canvas) => {
+      const img = canvasToImage.get(canvas);
+      const raw = canvasToRawCanvas.get(canvas);
+
+      let sourceCanvas = null;
+
+      if (raw && raw.canvas) {
+        sourceCanvas = raw.canvas;
+      } else if (img) {
+        const w = img.naturalWidth || 1;
+        const h = img.naturalHeight || 1;
+        if (typeof OffscreenCanvas !== 'undefined') {
+          sourceCanvas = new OffscreenCanvas(w, h);
+        } else {
+          sourceCanvas = document.createElement('canvas');
+          sourceCanvas.width = w;
+          sourceCanvas.height = h;
+        }
+        const ctx = sourceCanvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+      } else {
+        sourceCanvas = canvas;
+      }
+
+      const blob = await canvasToJpegBlob(sourceCanvas);
+      if (!blob) return null;
+      return await blobToBase64(blob);
+    },
+
     downloadPng: async (canvas, filename) => {
       const img = canvasToImage.get(canvas);
       const raw = canvasToRawCanvas.get(canvas);
@@ -200,6 +245,35 @@
       const blob = await canvasToPngBlob(sourceCanvas);
       if (!blob) return;
       downloadBlob(blob, filename || 'image.png');
+    },
+
+    downloadJpeg: async (canvas, filename) => {
+      const img = canvasToImage.get(canvas);
+      const raw = canvasToRawCanvas.get(canvas);
+
+      let sourceCanvas = null;
+
+      if (raw && raw.canvas) {
+        sourceCanvas = raw.canvas;
+      } else if (img) {
+        const w = img.naturalWidth || 1;
+        const h = img.naturalHeight || 1;
+        if (typeof OffscreenCanvas !== 'undefined') {
+          sourceCanvas = new OffscreenCanvas(w, h);
+        } else {
+          sourceCanvas = document.createElement('canvas');
+          sourceCanvas.width = w;
+          sourceCanvas.height = h;
+        }
+        const ctx = sourceCanvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+      } else {
+        sourceCanvas = canvas;
+      }
+
+      const blob = await canvasToJpegBlob(sourceCanvas);
+      if (!blob) return;
+      downloadBlob(blob, filename || 'image.jpg');
     }
   };
 })();

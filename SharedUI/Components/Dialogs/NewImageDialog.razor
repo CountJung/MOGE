@@ -1,0 +1,37 @@
+@using MudBlazor
+
+<MudDialog>
+    <DialogContent>
+        <MudStack Spacing="2">
+            <MudNumericField T="int" @bind-Value="_width" Label="캔버스 너비(px)" Variant="Variant.Outlined" dense="true" Min="1" Max="8192" />
+            <MudNumericField T="int" @bind-Value="_height" Label="캔버스 높이(px)" Variant="Variant.Outlined" dense="true" Min="1" Max="8192" />
+            <MudText Typo="Typo.caption">기본 배경은 흰색입니다.</MudText>
+        </MudStack>
+    </DialogContent>
+
+    <DialogActions>
+        <MudButton OnClick="Cancel">취소</MudButton>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" Disabled="@(_width < 1 || _height < 1)" OnClick="Ok">생성</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    public sealed record Result(int Width, int Height);
+
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public int InitialWidth { get; set; } = 1024;
+    [Parameter] public int InitialHeight { get; set; } = 768;
+
+    private int _width;
+    private int _height;
+
+    protected override void OnInitialized()
+    {
+        _width = Math.Clamp(InitialWidth, 1, 8192);
+        _height = Math.Clamp(InitialHeight, 1, 8192);
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+    private void Ok() => MudDialog.Close(DialogResult.Ok(new Result(_width, _height)));
+}

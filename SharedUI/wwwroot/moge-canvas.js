@@ -18,6 +18,22 @@
     return null;
   }
 
+  async function canvasToJpegBlob(sourceCanvas) {
+    if (!sourceCanvas) return null;
+
+    // OffscreenCanvas: convertToBlob
+    if (typeof OffscreenCanvas !== 'undefined' && sourceCanvas instanceof OffscreenCanvas) {
+      return await sourceCanvas.convertToBlob({ type: 'image/jpeg', quality: 0.92 });
+    }
+
+    // HTMLCanvasElement: toBlob
+    if (typeof sourceCanvas.toBlob === 'function') {
+      return await new Promise((resolve) => sourceCanvas.toBlob(resolve, 'image/jpeg', 0.92));
+    }
+
+    return null;
+  }
+
   async function blobToBase64(blob) {
     const buffer = await blob.arrayBuffer();
     const bytes = new Uint8Array(buffer);
@@ -169,6 +185,35 @@
       return await blobToBase64(blob);
     },
 
+    exportJpegBase64: async (canvas) => {
+      const img = canvasToImage.get(canvas);
+      const raw = canvasToRawCanvas.get(canvas);
+
+      let sourceCanvas = null;
+
+      if (raw && raw.canvas) {
+        sourceCanvas = raw.canvas;
+      } else if (img) {
+        const w = img.naturalWidth || 1;
+        const h = img.naturalHeight || 1;
+        if (typeof OffscreenCanvas !== 'undefined') {
+          sourceCanvas = new OffscreenCanvas(w, h);
+        } else {
+          sourceCanvas = document.createElement('canvas');
+          sourceCanvas.width = w;
+          sourceCanvas.height = h;
+        }
+        const ctx = sourceCanvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+      } else {
+        sourceCanvas = canvas;
+      }
+
+      const blob = await canvasToJpegBlob(sourceCanvas);
+      if (!blob) return null;
+      return await blobToBase64(blob);
+    },
+
     downloadPng: async (canvas, filename) => {
       const img = canvasToImage.get(canvas);
       const raw = canvasToRawCanvas.get(canvas);
@@ -196,6 +241,35 @@
       const blob = await canvasToPngBlob(sourceCanvas);
       if (!blob) return;
       downloadBlob(blob, filename || 'image.png');
+    },
+
+    downloadJpeg: async (canvas, filename) => {
+      const img = canvasToImage.get(canvas);
+      const raw = canvasToRawCanvas.get(canvas);
+
+      let sourceCanvas = null;
+
+      if (raw && raw.canvas) {
+        sourceCanvas = raw.canvas;
+      } else if (img) {
+        const w = img.naturalWidth || 1;
+        const h = img.naturalHeight || 1;
+        if (typeof OffscreenCanvas !== 'undefined') {
+          sourceCanvas = new OffscreenCanvas(w, h);
+        } else {
+          sourceCanvas = document.createElement('canvas');
+          sourceCanvas.width = w;
+          sourceCanvas.height = h;
+        }
+        const ctx = sourceCanvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+      } else {
+        sourceCanvas = canvas;
+      }
+
+      const blob = await canvasToJpegBlob(sourceCanvas);
+      if (!blob) return;
+      downloadBlob(blob, filename || 'image.jpg');
     }
   };
 })();

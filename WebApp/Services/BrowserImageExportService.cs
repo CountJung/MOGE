@@ -6,10 +6,13 @@ namespace WebApp.Services;
 
 internal sealed class BrowserImageExportService(IJSRuntime js) : IImageExportService
 {
-    public Task SavePngAsync(ElementReference canvas, string suggestedFileName, CancellationToken cancellationToken = default)
+    public Task SaveAsync(ElementReference canvas, string suggestedFileName, ImageExportFormat format, CancellationToken cancellationToken = default)
     {
-        var filename = FileNameUtil.GetSafeFileName(suggestedFileName, "image.png", ".png");
+        var filename = format == ImageExportFormat.Jpeg
+            ? FileNameUtil.GetSafeFileName(suggestedFileName, "image.jpg", ".jpg")
+            : FileNameUtil.GetSafeFileName(suggestedFileName, "image.png", ".png");
 
-        return js.InvokeVoidAsync("mogeCanvas.downloadPng", cancellationToken, canvas, filename).AsTask();
+        var fn = format == ImageExportFormat.Jpeg ? "mogeCanvas.downloadJpeg" : "mogeCanvas.downloadPng";
+        return js.InvokeVoidAsync(fn, cancellationToken, canvas, filename).AsTask();
     }
 }

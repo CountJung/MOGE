@@ -4,34 +4,59 @@
     <MudStack Spacing="2">
         <MudText Typo="Typo.h5">Editor</MudText>
 
-        <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
-            <MudTooltip Text="Open image">
-                <MudIconButton Icon="@Icons.Material.Filled.FolderOpen" Color="Color.Primary"
-                               OnClick="@(async () => await OpenImage.InvokeAsync())"
-                               aria-label="Open image" />
+        <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Style="flex-wrap:wrap;">
+            <MudTooltip Text="New">
+                <MudIconButton Icon="@Icons.Material.Filled.NoteAdd" Color="Color.Inherit"
+                               OnClick="@(async () => await New.InvokeAsync())"
+                               aria-label="New" />
             </MudTooltip>
 
-            @if (HasImage)
-            {
-                <MudText Typo="Typo.body2">@FileName (@(FileSizeBytes / 1024) KB)</MudText>
+            <MudTooltip Text="Load image(s)">
+                <MudIconButton Icon="@Icons.Material.Filled.FolderOpen" Color="Color.Primary"
+                               OnClick="@(async () => await OpenImage.InvokeAsync())"
+                               aria-label="Load images" />
+            </MudTooltip>
 
-                <MudTooltip Text="Save as PNG">
-                    <MudIconButton Icon="@Icons.Material.Filled.Download" Color="Color.Inherit"
-                                   OnClick="@(async () => await SavePng.InvokeAsync())"
-                                   aria-label="Save as PNG" />
-                </MudTooltip>
+            <MudTooltip Text="Save">
+                <MudIconButton Icon="@Icons.Material.Filled.Download" Color="Color.Inherit" Disabled="@(!HasImage)"
+                               OnClick="@(async () => await SavePng.InvokeAsync())"
+                               aria-label="Save" />
+            </MudTooltip>
 
-                <MudTooltip Text="Clear image">
-                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error"
-                                   OnClick="@(async () => await Clear.InvokeAsync())"
-                                   aria-label="Clear image" />
-                </MudTooltip>
-            }
-            else
-            {
-                <MudText Typo="Typo.body2">No image loaded</MudText>
-            }
+            <MudTooltip Text="Remove loaded image">
+                <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Disabled="@(!HasImage)"
+                               OnClick="@(async () => await RemoveLoaded.InvokeAsync())"
+                               aria-label="Remove loaded image" />
+            </MudTooltip>
+
+            <MudText Typo="Typo.body2" Class="ml-2">
+                @if (HasImage)
+                {
+                    @($"{FileName} ({FileSizeBytes / 1024} KB)")
+                }
+                else
+                {
+                    <text>No image loaded</text>
+                }
+            </MudText>
         </MudStack>
+
+        @if (LoadedImages is { Count: > 0 })
+        {
+            <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Style="flex-wrap:wrap;">
+                @for (var i = 0; i < LoadedImages.Count; i++)
+                {
+                    var idx = i;
+                    var name = LoadedImages[i];
+                    var isSelected = idx == SelectedLoadedIndex;
+
+                    <MudChip T="string" Value="@name" clickable="true" Size="Size.Small" Color="@(isSelected ? Color.Primary : Color.Default)"
+                             OnClick="@(async () => await SelectLoadedIndex.InvokeAsync(idx))">
+                        @name
+                    </MudChip>
+                }
+            </MudStack>
+        }
 
         <MudDivider />
         <MudText Typo="Typo.body2">Use the Properties panel (right side of the canvas) for filters and perspective.</MudText>

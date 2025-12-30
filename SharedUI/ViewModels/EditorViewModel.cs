@@ -43,6 +43,8 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
 
     private string _foregroundColorHex = "#000000";
     private string _backgroundColorHex = "#ffffff";
+    private int _foregroundAlpha = 255;
+    private int _backgroundAlpha = 255;
     private string _textInput = string.Empty;
     private int _textSize = 1;
     private int _textThickness = 2;
@@ -102,6 +104,9 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
     public long FileSizeBytes => _document.Bytes?.Length ?? 0;
     public string? ContentType => _document.ContentType;
 
+    public int ImageWidth => _imageWidth;
+    public int ImageHeight => _imageHeight;
+
     public byte[]? ViewBytes => _viewBytes;
 
     public bool IsProcessing => Volatile.Read(ref _processingCount) > 0;
@@ -117,6 +122,9 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
 
     public string ForegroundColorHex => _foregroundColorHex;
     public string BackgroundColorHex => _backgroundColorHex;
+
+    public int ForegroundAlpha => _foregroundAlpha;
+    public int BackgroundAlpha => _backgroundAlpha;
 
     public string TextInput => _textInput;
 
@@ -178,6 +186,21 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
                 result[i] = (_loadedImages[i].Pick.FileName, _loadedImages[i].ThumbnailDataUrl, i);
 
             return result;
+        }
+    }
+
+    public IReadOnlyList<string> LoadedImageNames
+    {
+        get
+        {
+            if (_loadedImages.Count == 0)
+                return Array.Empty<string>();
+
+            var names = new string[_loadedImages.Count];
+            for (var i = 0; i < _loadedImages.Count; i++)
+                names[i] = _loadedImages[i].Pick.FileName;
+
+            return names;
         }
     }
 
@@ -319,6 +342,101 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         return Task.CompletedTask;
     }
 
+    public Task NewAsync()
+    {
+        // Reset editor state but keep the loaded images list (acts like "new document" on current selection).
+        _debounceCts?.Cancel();
+        _debounceCts?.Dispose();
+        _debounceCts = null;
+
+        _magicWandDebounceCts?.Cancel();
+        _magicWandDebounceCts?.Dispose();
+        _magicWandDebounceCts = null;
+
+        _perspectiveMode = false;
+        _cropMode = false;
+        _selectionMode = false;
+        _handles = new();
+        _selectionMask = null;
+        _selectionPreviewHandles = new();
+        _selectionPreviewPolygonPoints = new();
+
+        _history.Clear();
+        _historyIndex = -1;
+
+        _viewBytes = CurrentBytes;
+        _status = null;
+
+        NotifyAll();
+        return Task.CompletedTask;
+    }
+
+    public Task CreateNewCanvasAsync(int width, int height)
+    {
+        var created = _imageProcessor.CreateBlankWhite(width, height);
+
+        // Starting a brand-new canvas: clear any loaded list selection.
+        _loadedImages.Clear();
+        _selectedLoadedIndex = -1;
+
+        var safeW = Math.Clamp(width, 1, 8192);
+        var safeH = Math.Clamp(height, 1, 8192);
+        _imageWidth = safeW;
+        _imageHeight = safeH;
+
+        var fileName = $"canvas-{safeW}x{safeH}.png";
+        _document.Set(new ImagePickResult(fileName, created.ContentType, created.Bytes));
+
+        // Reset editor state and show the new image.
+        _ = NewAsync();
+        _viewBytes = created.Bytes;
+        _status = $"New canvas: {safeW}x{safeH}";
+        RefreshFooter();
+        NotifyAll();
+        return Task.CompletedTask;
+    }
+
+    public Task RemoveSelectedLoadedImageAsync()
+    {
+        if (_selectedLoadedIndex < 0 || _selectedLoadedIndex >= _loadedImages.Count)
+            return Task.CompletedTask;
+
+        var removingCurrent = HasImage;
+
+        _loadedImages.RemoveAt(_selectedLoadedIndex);
+
+        if (_loadedImages.Count == 0)
+        {
+            _selectedLoadedIndex = -1;
+            _document.Clear();
+            _viewBytes = null;
+            _history.Clear();
+            _historyIndex = -1;
+            _handles = new();
+            _selectionMask = null;
+            _selectionPreviewHandles = new();
+            _selectionPreviewPolygonPoints = new();
+            _status = null;
+            NotifyAll();
+            return Task.CompletedTask;
+        }
+
+        // Re-select: prefer same index, otherwise previous.
+        var nextIndex = Math.Min(_selectedLoadedIndex, _loadedImages.Count - 1);
+        if (nextIndex < 0)
+            nextIndex = 0;
+
+        _selectedLoadedIndex = -1;
+
+        // Switching source should reset editor state.
+        if (removingCurrent)
+            _ = NewAsync();
+
+        SelectLoadedImage(nextIndex);
+        NotifyAll();
+        return Task.CompletedTask;
+    }
+
     public void SelectLoadedImage(int index)
     {
         if (index < 0 || index >= _loadedImages.Count)
@@ -357,12 +475,32 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
             return;
 
         var baseName = FileNameUtil.GetSafeBaseName(FileName, "image");
-        var filename = $"{baseName}-edited.png";
-
-        await _imageExport.SavePngAsync(_canvas, filename);
-        _status = $"Saved: {filename}";
+        await SaveAsAsync($"{baseName}-edited", ImageExportFormat.Png);
         RefreshFooter();
         NotifyAll();
+    }
+
+    public async Task SaveAsAsync(string fileName, ImageExportFormat format)
+    {
+        if (!HasImage)
+            return;
+
+        if (!_hasCanvas)
+            return;
+
+        BeginProcessing("Saving...");
+        try
+        {
+            await _imageExport.SaveAsync(_canvas, fileName, format);
+            var ext = format == ImageExportFormat.Jpeg ? ".jpg" : ".png";
+            _status = $"Saved: {fileName}{ext}";
+            RefreshFooter();
+            NotifyAll();
+        }
+        finally
+        {
+            EndProcessing();
+        }
     }
 
     private void RefreshFooter() => _pushFooterMessage(_status);
@@ -723,7 +861,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         if (baseBytes is null)
             return;
 
-        var color = Rgba32.FromHexOrDefault(_foregroundColorHex, new Rgba32(0, 0, 0, 255));
+        var color = WithAlpha(Rgba32.FromHexOrDefault(_foregroundColorHex, new Rgba32(0, 0, 0, 255)), _foregroundAlpha);
 
         _status = "Applying text...";
         RefreshFooter();
@@ -795,9 +933,23 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         return Task.CompletedTask;
     }
 
+    public Task OnForegroundAlphaChanged(int a)
+    {
+        _foregroundAlpha = Math.Clamp(a, 0, 255);
+        NotifyAll();
+        return Task.CompletedTask;
+    }
+
     public Task OnBackgroundColorHexChanged(string hex)
     {
         _backgroundColorHex = NormalizeHexColor(hex, "#ffffff");
+        NotifyAll();
+        return Task.CompletedTask;
+    }
+
+    public Task OnBackgroundAlphaChanged(int a)
+    {
+        _backgroundAlpha = Math.Clamp(a, 0, 255);
         NotifyAll();
         return Task.CompletedTask;
     }
@@ -853,7 +1005,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
             h = Math.Max(1, _imageHeight);
         }
 
-        var target = Rgba32.FromHexOrDefault(_foregroundColorHex, new Rgba32(0, 0, 0, 255));
+        var target = WithAlpha(Rgba32.FromHexOrDefault(_foregroundColorHex, new Rgba32(0, 0, 0, 255)), _foregroundAlpha);
 
         _status = "Selecting similar colors...";
         RefreshFooter();
@@ -893,7 +1045,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
 
     public async Task FillSelectionAsync()
     {
-        var fill = Rgba32.FromHexOrDefault(_foregroundColorHex, new Rgba32(0, 0, 0, 255));
+        var fill = WithAlpha(Rgba32.FromHexOrDefault(_foregroundColorHex, new Rgba32(0, 0, 0, 255)), _foregroundAlpha);
 
         var mask = _selectionMask;
 
@@ -968,7 +1120,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
             return;
 
         var (x0, y0, w, h) = GetHandlesRect();
-        var color = Rgba32.FromHexOrDefault(_foregroundColorHex, new Rgba32(0, 0, 0, 255));
+        var color = WithAlpha(Rgba32.FromHexOrDefault(_foregroundColorHex, new Rgba32(0, 0, 0, 255)), _foregroundAlpha);
 
         // Place text near the top-left inside the selection rectangle.
         var tx = Math.Clamp(x0 + 4, 0, Math.Max(0, _imageWidth - 1));
@@ -1026,6 +1178,9 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
 
         return s;
     }
+
+    private static Rgba32 WithAlpha(Rgba32 c, int a)
+        => new(c.R, c.G, c.B, (byte)Math.Clamp(a, 0, 255));
 
     public Task OnSelectionBlurKernelSizeChanged(int v)
     {
@@ -1398,8 +1553,8 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         {
             var radius = Math.Clamp(_brushRadius, 1, 64);
             var color = stroke.Mode == CanvasInteractionMode.Eraser
-                ? Rgba32.FromHexOrDefault(_backgroundColorHex, new Rgba32(255, 255, 255, 255))
-                : Rgba32.FromHexOrDefault(_foregroundColorHex, new Rgba32(0, 0, 0, 255));
+                ? WithAlpha(Rgba32.FromHexOrDefault(_backgroundColorHex, new Rgba32(255, 255, 255, 255)), _backgroundAlpha)
+                : WithAlpha(Rgba32.FromHexOrDefault(_foregroundColorHex, new Rgba32(0, 0, 0, 255)), _foregroundAlpha);
 
             next = await RunImageCpuAsync(
                 () => _imageProcessor.ApplyStroke(baseBytes, stroke.Mode, stroke.Points, radius, color),

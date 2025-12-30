@@ -9,11 +9,21 @@
         <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Style="flex-wrap:wrap;">
             <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
                 <MudText Typo="Typo.caption">FG</MudText>
-                <input type="color" value="@ForegroundColorHex" disabled="@(!HasImage)" style="height:32px; width:40px; padding:0; border:1px solid var(--mud-palette-lines-default); border-radius: var(--mud-default-borderradius); background:transparent;" @onchange="OnForegroundColorInput" />
+                <input type="color" value="@ForegroundColorHex"  style="height:32px; width:40px; padding:0; border:1px solid var(--mud-palette-lines-default); border-radius: var(--mud-default-borderradius); background:transparent;" @onchange="OnForegroundColorInput" />
+                <MudText Typo="Typo.caption">A</MudText>
+                <MudSlider T="int" Value="@ForegroundAlpha" ValueChanged="OnForegroundAlphaChanged" Min="0" Max="255" Step="1" Style="width:120px;" />
+                <MudTooltip Text="Set FG transparent">
+                    <MudIconButton Icon="@Icons.Material.Filled.Opacity" Disabled="@ToolDisabled" OnClick="SetForegroundTransparent" aria-label="Foreground transparent" />
+                </MudTooltip>
             </MudStack>
             <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
                 <MudText Typo="Typo.caption">BG</MudText>
-                <input type="color" value="@BackgroundColorHex" disabled="@(!HasImage)" style="height:32px; width:40px; padding:0; border:1px solid var(--mud-palette-lines-default); border-radius: var(--mud-default-borderradius); background:transparent;" @onchange="OnBackgroundColorInput" />
+                <input type="color" value="@BackgroundColorHex"  style="height:32px; width:40px; padding:0; border:1px solid var(--mud-palette-lines-default); border-radius: var(--mud-default-borderradius); background:transparent;" @onchange="OnBackgroundColorInput" />
+                <MudText Typo="Typo.caption">A</MudText>
+                <MudSlider T="int" Value="@BackgroundAlpha" ValueChanged="OnBackgroundAlphaChanged" Min="0" Max="255" Step="1" Style="width:120px;" />
+                <MudTooltip Text="Set BG transparent">
+                    <MudIconButton Icon="@Icons.Material.Filled.Opacity" Disabled="@ToolDisabled" OnClick="SetBackgroundTransparent" aria-label="Background transparent" />
+                </MudTooltip>
             </MudStack>
         </MudStack>
 

@@ -4,5 +4,5 @@ namespace SharedUI.Services;
 
 public interface IImageExportService
 {
-    Task SavePngAsync(ElementReference canvas, string suggestedFileName, CancellationToken cancellationToken = default);
+    Task SaveAsync(ElementReference canvas, string suggestedFileName, ImageExportFormat format, CancellationToken cancellationToken = default);
 }

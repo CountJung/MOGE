@@ -10,43 +10,20 @@
 @inject ImageDocumentState Document
 @inject ImageProcessorService ImageProcessor
 @inject IImageExportService ImageExport
+@inject MudBlazor.IDialogService DialogService
 
 <MudGrid Class="pa-4" Spacing="2" Style="margin-bottom: var(--moge-footer-height, 96px);">
     <MudItem xs="12">
         <EditorHeader HasImage="@Vm!.HasImage"
                       FileName="@Vm!.FileName"
                       FileSizeBytes="@Vm!.FileSizeBytes"
+                      New="OnNewClickedAsync"
                       OpenImage="Vm!.PickImagesAsync"
-                      SavePng="Vm!.SavePngAsync"
-                      Clear="Vm!.ClearAsync" />
-    </MudItem>
-
-    <MudItem xs="12">
-        @if (Vm!.LoadedImages.Count > 0)
-        {
-            <MudPaper Class="pa-2" Outlined="true" Style="overflow-x:auto;">
-                <MudStack Row="true" Spacing="2" Style="flex-wrap:nowrap;">
-                    @foreach (var item in Vm!.LoadedImages)
-                    {
-                        var idx = item.Index;
-                        var isSelected = idx == Vm!.SelectedLoadedIndex;
-
-                        <MudPaper Class="pa-2" Elevation="0" Style="@SharedUI.ViewModels.EditorViewModel.GetLoadedImageCardStyle(isSelected)" @onclick="(() => Vm!.SelectLoadedImage(idx))">
-                            @if (!string.IsNullOrWhiteSpace(item.ThumbnailDataUrl))
-                            {
-                                <MudImage Src="@item.ThumbnailDataUrl" Width="120" Height="120" Style="object-fit:contain;" />
-                            }
-                            else
-                            {
-                                <MudText Typo="Typo.caption">(no preview)</MudText>
-                            }
-
-                            <MudText Typo="Typo.caption" Style="max-width:120px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">@item.FileName</MudText>
-                        </MudPaper>
-                    }
-                </MudStack>
-            </MudPaper>
-        }
+                      SavePng="OnSaveClickedAsync"
+                      LoadedImages="@Vm!.LoadedImageNames"
+                      SelectedLoadedIndex="@Vm!.SelectedLoadedIndex"
+                      SelectLoadedIndex="Vm!.SelectLoadedImage"
+                      RemoveLoaded="Vm!.RemoveSelectedLoadedImageAsync" />
     </MudItem>
 
     <MudItem xs="12" md="3" lg="2">
@@ -61,8 +38,12 @@
                        MagicWandToleranceChanged="Vm!.OnMagicWandToleranceChanged"
                        ForegroundColorHex="@Vm!.ForegroundColorHex"
                        ForegroundColorHexChanged="Vm!.OnForegroundColorHexChanged"
+                       ForegroundAlpha="@Vm!.ForegroundAlpha"
+                       ForegroundAlphaChanged="Vm!.OnForegroundAlphaChanged"
                        BackgroundColorHex="@Vm!.BackgroundColorHex"
                        BackgroundColorHexChanged="Vm!.OnBackgroundColorHexChanged"
+                       BackgroundAlpha="@Vm!.BackgroundAlpha"
+                       BackgroundAlphaChanged="Vm!.OnBackgroundAlphaChanged"
                        SelectionMode="@Vm!.SelectionMode"
                        SelectionModeChanged="Vm!.OnSelectionModeChanged"
                        SelectionBlurKernelSize="@Vm!.SelectionBlurKernelSize"

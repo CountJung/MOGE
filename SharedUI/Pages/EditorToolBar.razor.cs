@@ -31,8 +31,14 @@ public partial class EditorToolBar
     [Parameter] public string ForegroundColorHex { get; set; } = "#000000";
     [Parameter] public EventCallback<string> ForegroundColorHexChanged { get; set; }
 
+    [Parameter] public int ForegroundAlpha { get; set; } = 255;
+    [Parameter] public EventCallback<int> ForegroundAlphaChanged { get; set; }
+
     [Parameter] public string BackgroundColorHex { get; set; } = "#ffffff";
     [Parameter] public EventCallback<string> BackgroundColorHexChanged { get; set; }
+
+    [Parameter] public int BackgroundAlpha { get; set; } = 255;
+    [Parameter] public EventCallback<int> BackgroundAlphaChanged { get; set; }
 
     [Parameter] public EventCallback FillSelection { get; set; }
 
@@ -131,6 +137,12 @@ public partial class EditorToolBar
         return ForegroundColorHexChanged.InvokeAsync(v);
     }
 
+    private Task OnForegroundAlphaChanged(int a)
+        => ForegroundAlphaChanged.InvokeAsync(Math.Clamp(a, 0, 255));
+
+    private Task SetForegroundTransparent()
+        => ForegroundAlphaChanged.InvokeAsync(0);
+
     private Task OnBackgroundColorInput(ChangeEventArgs e)
     {
         var v = e.Value?.ToString();
@@ -139,4 +151,10 @@ public partial class EditorToolBar
 
         return BackgroundColorHexChanged.InvokeAsync(v);
     }
+
+    private Task OnBackgroundAlphaChanged(int a)
+        => BackgroundAlphaChanged.InvokeAsync(Math.Clamp(a, 0, 255));
+
+    private Task SetBackgroundTransparent()
+        => BackgroundAlphaChanged.InvokeAsync(0);
 }

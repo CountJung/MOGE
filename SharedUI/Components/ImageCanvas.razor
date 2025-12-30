@@ -99,7 +99,7 @@
 
 @code {
     [Inject] private IJSRuntime Js { get; set; } = default!;
-    [Inject] private IRawImageProvider? RawProvider { get; set; }
+    [Inject] private IServiceProvider Services { get; set; } = default!;
     [Inject] private AppSettingsService Settings { get; set; } = default!;
 
     [Parameter] public byte[]? ImageBytes { get; set; }
@@ -224,10 +224,12 @@
         }
 
         // Raw-token path (no OpenCV encoder available): render using cached RGBA pixels.
-        if (RawToken.IsToken(ImageBytes) && RawProvider is not null)
+        // Note: Some hosts (e.g., Hybrid) may not register an IRawImageProvider; treat it as optional.
+        if (RawToken.IsToken(ImageBytes))
         {
+            var rawProvider = Services.GetService(typeof(IRawImageProvider)) as IRawImageProvider;
             var sig = ImageSignature.Create(ImageBytes);
-            if (RawProvider.TryGet(sig, out var raw) && raw.RgbaBytes is { Length: > 0 })
+            if (rawProvider is not null && rawProvider.TryGet(sig, out var raw) && raw.RgbaBytes is { Length: > 0 })
             {
                 await Js.InvokeVoidAsync("mogeCanvas.setRawRgba", _canvas, raw.Width, raw.Height, raw.RgbaBytes);
                 _imagePixelWidth = raw.Width;
@@ -235,6 +237,15 @@
                 await RedrawAsync();
                 return;
             }
+
+            // Raw token without a cached RGBA payload: do not fall back to browser image decoding.
+            await Js.InvokeVoidAsync("mogeCanvas.clear", _canvas);
+            _scale = 1;
+            _offsetX = 0;
+            _offsetY = 0;
+            _imagePixelWidth = 0;
+            _imagePixelHeight = 0;
+            return;
         }
 
         var ct = InferContentType(ImageBytes, ContentType);

@@ -36,6 +36,36 @@ public sealed class ImageProcessorService
         double Contrast,
         double Brightness);
 
+    public (byte[] Bytes, string ContentType) CreateBlankWhite(int width, int height)
+    {
+        width = Math.Clamp(width, 1, 8192);
+        height = Math.Clamp(height, 1, 8192);
+
+        if (OperatingSystem.IsBrowser())
+        {
+            if (_raw is not IRawImageCache cache)
+                throw new InvalidOperationException("Raw image cache not available on browser runtime.");
+
+            var token = RawToken.Create();
+            var rgba = new byte[checked(width * height * 4)];
+            // white RGBA
+            for (var i = 0; i < rgba.Length; i += 4)
+            {
+                rgba[i + 0] = 255;
+                rgba[i + 1] = 255;
+                rgba[i + 2] = 255;
+                rgba[i + 3] = 255;
+            }
+
+            cache.Set(ImageSignature.Create(token), new RawRgbaImage(width, height, rgba));
+            return (token, "moge/raw");
+        }
+
+        using var mat = new Mat(height, width, MatType.CV_8UC3, new Scalar(255, 255, 255));
+        Cv2.ImEncode(".png", mat, out var buf);
+        return (buf.ToArray(), "image/png");
+    }
+
     public byte[] ApplyPipeline(byte[] imageBytes, ProcessingSettings settings)
     {
         if (OperatingSystem.IsBrowser())

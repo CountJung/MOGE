@@ -6,18 +6,21 @@ namespace HybridApp.Services;
 
 internal sealed class WindowsImageExportService(IJSRuntime js) : IImageExportService
 {
-    public async Task SavePngAsync(ElementReference canvas, string suggestedFileName, CancellationToken cancellationToken = default)
+    public async Task SaveAsync(ElementReference canvas, string suggestedFileName, ImageExportFormat format, CancellationToken cancellationToken = default)
     {
-        var filename = FileNameUtil.GetSafeFileName(suggestedFileName, "image.png", ".png");
+        var filename = format == ImageExportFormat.Jpeg
+            ? FileNameUtil.GetSafeFileName(suggestedFileName, "image.jpg", ".jpg")
+            : FileNameUtil.GetSafeFileName(suggestedFileName, "image.png", ".png");
 
-        var base64 = await js.InvokeAsync<string?>("mogeCanvas.exportPngBase64", cancellationToken, canvas);
+        var fn = format == ImageExportFormat.Jpeg ? "mogeCanvas.exportJpegBase64" : "mogeCanvas.exportPngBase64";
+        var base64 = await js.InvokeAsync<string?>(fn, cancellationToken, canvas);
         if (string.IsNullOrWhiteSpace(base64))
             return;
 
         var bytes = Convert.FromBase64String(base64);
 
 #if WINDOWS
-        var file = await PickPngSaveFileAsync(filename);
+    var file = await PickSaveFileAsync(filename, format);
         if (file is null)
             return;
 
@@ -28,7 +31,7 @@ internal sealed class WindowsImageExportService(IJSRuntime js) : IImageExportSer
     }
 
 #if WINDOWS
-    private static async Task<Windows.Storage.StorageFile?> PickPngSaveFileAsync(string suggestedFileName)
+    private static async Task<Windows.Storage.StorageFile?> PickSaveFileAsync(string suggestedFileName, ImageExportFormat format)
     {
         var safeBaseName = FileNameUtil.GetSafeBaseName(suggestedFileName, "image");
 
@@ -38,7 +41,10 @@ internal sealed class WindowsImageExportService(IJSRuntime js) : IImageExportSer
             SuggestedFileName = safeBaseName
         };
 
-        picker.FileTypeChoices.Add("PNG Image", new List<string> { ".png" });
+        if (format == ImageExportFormat.Jpeg)
+            picker.FileTypeChoices.Add("JPEG Image", new List<string> { ".jpg", ".jpeg" });
+        else
+            picker.FileTypeChoices.Add("PNG Image", new List<string> { ".png" });
 
         var hwnd = GetWindowHandle();
         WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
