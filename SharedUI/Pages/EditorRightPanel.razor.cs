@@ -94,6 +94,21 @@ public partial class EditorRightPanel
     [Parameter] public IReadOnlyList<EditorHistoryListItem>? HistoryItems { get; set; }
     [Parameter] public EventCallback<int> HistoryItemSelected { get; set; }
 
+    [Parameter] public IReadOnlyList<(Guid Id, string Name, bool Visible, int Index)>? Layers { get; set; }
+    [Parameter] public int ActiveLayerIndex { get; set; } = -1;
+
+    [Parameter] public EventCallback<int> LayerSelected { get; set; }
+
+    [Parameter] public EventCallback AddLayer { get; set; }
+    [Parameter] public EventCallback DuplicateLayer { get; set; }
+    [Parameter] public EventCallback DeleteLayer { get; set; }
+    [Parameter] public EventCallback MergeDownLayer { get; set; }
+
+    [Parameter] public bool CanDeleteLayer { get; set; }
+    [Parameter] public bool CanMergeDown { get; set; }
+    [Parameter] public bool CanToggleLayerVisibility { get; set; }
+    [Parameter] public EventCallback<int> ToggleLayerVisibility { get; set; }
+
     private static string ToggleIconStyle(bool isActive)
     {
         var borderColor = isActive ? "var(--mud-palette-primary)" : "var(--mud-palette-lines-default)";
@@ -154,4 +169,24 @@ public partial class EditorRightPanel
     private Task ToggleEmboss() => EmbossChanged.InvokeAsync(!Emboss);
 
     private Task ToggleCanny() => CannyChanged.InvokeAsync(!Canny);
+
+    private Task SelectLayerAsync(int index)
+    {
+        if (!HasImage)
+            return Task.CompletedTask;
+
+        if (index == ActiveLayerIndex)
+            return Task.CompletedTask;
+
+        return LayerSelected.InvokeAsync(index);
+    }
+
+    private static string LayerItemStyle(bool isActive)
+    {
+        var border = isActive
+            ? "2px solid var(--mud-palette-primary)"
+            : "1px solid var(--mud-palette-lines-default)";
+
+        return $"border:{border}; border-radius: var(--mud-default-borderradius); cursor:pointer; user-select:none;";
+    }
 }

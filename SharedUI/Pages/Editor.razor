@@ -90,6 +90,17 @@
         <MudPaper Elevation="1" Class="pa-2" Style="height: clamp(240px, 65vh, 680px); overflow:auto;">
             <EditorRightPanel
                 HasImage="@Vm!.HasImage"
+                Layers="@Vm!.Layers"
+                ActiveLayerIndex="@Vm!.ActiveLayerIndex"
+                CanDeleteLayer="@Vm!.CanDeleteLayer"
+                CanMergeDown="@Vm!.CanMergeDown"
+                CanToggleLayerVisibility="@Vm!.CanToggleLayerVisibility"
+                LayerSelected="Vm!.SelectLayer"
+                ToggleLayerVisibility="Vm!.ToggleLayerVisibilityAsync"
+                AddLayer="Vm!.AddLayerAsync"
+                DuplicateLayer="Vm!.DuplicateLayerAsync"
+                DeleteLayer="Vm!.DeleteLayerAsync"
+                MergeDownLayer="Vm!.MergeDownActiveLayerAsync"
                 PerspectiveMode="@Vm!.PerspectiveMode"
                 PerspectiveModeChanged="Vm!.OnPerspectiveModeChanged"
                 ApplyPerspective="Vm!.ApplyPerspectiveAsync"

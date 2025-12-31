@@ -1859,4 +1859,156 @@ public sealed class ImageProcessorService
         cache.Set(ImageSignature.Create(token), raw);
         return token;
     }
+
+    public (byte[] Bytes, string ContentType) CreateTransparent(int width, int height)
+    {
+        width = Math.Clamp(width, 1, 8192);
+        height = Math.Clamp(height, 1, 8192);
+
+        if (OperatingSystem.IsBrowser())
+        {
+            if (_raw is not IRawImageCache cache)
+                throw new InvalidOperationException("Raw image cache not available on browser runtime.");
+
+            var token = RawToken.Create();
+            var rgba = new byte[checked(width * height * 4)];
+            cache.Set(ImageSignature.Create(token), new RawRgbaImage(width, height, rgba));
+            return (token, "moge/raw");
+        }
+
+        using var mat = new Mat(height, width, MatType.CV_8UC4, Scalar.All(0));
+        return (EncodeForDisplay(mat), "image/png");
+    }
+
+    public byte[] CompositeRgbaLayers(IReadOnlyList<byte[]> layers)
+    {
+        if (layers is null)
+            throw new ArgumentNullException(nameof(layers));
+
+        if (layers.Count == 0)
+            throw new ArgumentException("Expected at least one layer.", nameof(layers));
+
+        if (layers.Count == 1)
+            return layers[0];
+
+        if (OperatingSystem.IsBrowser())
+        {
+            var raws = new List<RawRgbaImage>(layers.Count);
+            for (var i = 0; i < layers.Count; i++)
+                raws.Add(GetRawOrThrow(layers[i]));
+
+            var w = raws[0].Width;
+            var h = raws[0].Height;
+            if (raws.Any(r => r.Width != w || r.Height != h))
+                throw new InvalidOperationException("All layers must share the same dimensions.");
+
+            var dst = new byte[checked(w * h * 4)];
+            foreach (var l in raws)
+                AlphaBlendOverRgba(dst, l.RgbaBytes);
+
+            return ReturnToken(new RawRgbaImage(w, h, dst));
+        }
+
+        using var baseMat = Decode(layers[0]);
+        using var accBgra = EnsureBgra(baseMat);
+
+        for (var i = 1; i < layers.Count; i++)
+        {
+            using var m = Decode(layers[i]);
+            using var over = EnsureBgra(m);
+            AlphaBlendOverBgra(accBgra, over);
+        }
+
+        return EncodeForDisplay(accBgra);
+
+        static Mat EnsureBgra(Mat m)
+        {
+            if (m.Empty())
+                return new Mat();
+
+            if (m.Channels() == 4)
+                return m.Clone();
+
+            var bgra = new Mat();
+            Cv2.CvtColor(m, bgra, ColorConversionCodes.BGR2BGRA);
+            return bgra;
+        }
+
+        static void AlphaBlendOverBgra(Mat dstBgra, Mat srcBgra)
+        {
+            if (dstBgra.Empty() || srcBgra.Empty())
+                return;
+
+            if (dstBgra.Width != srcBgra.Width || dstBgra.Height != srcBgra.Height)
+                throw new InvalidOperationException("All layers must share the same dimensions.");
+
+            for (var y = 0; y < dstBgra.Rows; y++)
+            {
+                for (var x = 0; x < dstBgra.Cols; x++)
+                {
+                    var s = srcBgra.At<Vec4b>(y, x); // BGRA
+                    var d = dstBgra.At<Vec4b>(y, x);
+
+                    var sa = s.Item3 / 255.0;
+                    var da = d.Item3 / 255.0;
+
+                    var outA = sa + da * (1 - sa);
+                    if (outA <= 0.000001)
+                    {
+                        dstBgra.Set(y, x, new Vec4b(0, 0, 0, 0));
+                        continue;
+                    }
+
+                    byte Blend(byte sc, byte dc)
+                    {
+                        var outC = (sc * sa + dc * da * (1 - sa)) / outA;
+                        return (byte)Math.Clamp((int)Math.Round(outC), 0, 255);
+                    }
+
+                    var outB = Blend(s.Item0, d.Item0);
+                    var outG = Blend(s.Item1, d.Item1);
+                    var outR = Blend(s.Item2, d.Item2);
+                    var outAlpha = (byte)Math.Clamp((int)Math.Round(outA * 255.0), 0, 255);
+
+                    dstBgra.Set(y, x, new Vec4b(outB, outG, outR, outAlpha));
+                }
+            }
+        }
+
+        static void AlphaBlendOverRgba(byte[] dstRgba, byte[] srcRgba)
+        {
+            if (dstRgba.Length != srcRgba.Length)
+                throw new InvalidOperationException("All layers must share the same dimensions.");
+
+            for (var i = 0; i < dstRgba.Length; i += 4)
+            {
+                var sr = srcRgba[i + 0] / 255.0;
+                var sg = srcRgba[i + 1] / 255.0;
+                var sb = srcRgba[i + 2] / 255.0;
+                var sa = srcRgba[i + 3] / 255.0;
+
+                var dr = dstRgba[i + 0] / 255.0;
+                var dg = dstRgba[i + 1] / 255.0;
+                var db = dstRgba[i + 2] / 255.0;
+                var da = dstRgba[i + 3] / 255.0;
+
+                var outA = sa + da * (1 - sa);
+                if (outA <= 0.000001)
+                {
+                    dstRgba[i + 0] = 0;
+                    dstRgba[i + 1] = 0;
+                    dstRgba[i + 2] = 0;
+                    dstRgba[i + 3] = 0;
+                    continue;
+                }
+
+                double Blend(double sc, double dc) => (sc * sa + dc * da * (1 - sa)) / outA;
+
+                dstRgba[i + 0] = (byte)Math.Clamp((int)Math.Round(Blend(sr, dr) * 255.0), 0, 255);
+                dstRgba[i + 1] = (byte)Math.Clamp((int)Math.Round(Blend(sg, dg) * 255.0), 0, 255);
+                dstRgba[i + 2] = (byte)Math.Clamp((int)Math.Round(Blend(sb, db) * 255.0), 0, 255);
+                dstRgba[i + 3] = (byte)Math.Clamp((int)Math.Round(outA * 255.0), 0, 255);
+            }
+        }
+    }
 }

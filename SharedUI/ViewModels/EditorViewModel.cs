@@ -6,7 +6,7 @@ using SharedUI.Services;
 
 namespace SharedUI.ViewModels;
 
-public sealed class EditorViewModel : ObservableObject, IDisposable
+public sealed partial class EditorViewModel : ObservableObject, IDisposable
 {
     private readonly IImageFilePicker _imageFilePicker;
     private readonly ImageDocumentState _document;
@@ -262,17 +262,20 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         _contrast = 1.0;
         _brightness = 0;
 
+        LayersReset();
+
         if (_document.Bytes is { Length: > 0 } bytes)
         {
             // Avoid heavy work (decode/thumbnail/size) on UI thread.
             _history.Add(new HistoryEntry(bytes, "Original", DateTime.UtcNow, null));
             _historyIndex = 0;
-            _viewBytes = bytes;
+
+            LayersInitFromDocumentBytes(bytes);
 
             _ = UpdateInitialImageMetaAsync(bytes);
         }
 
-        _viewBytes ??= CurrentBytes;
+        _viewBytes ??= GetCompositedBytesOrFallback() ?? CurrentBytes;
         _handles = new();
         _selectionMask = null;
         _imageWidth = 0;
@@ -857,9 +860,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
             return;
         }
 
-        var baseBytes = CurrentBytes;
-        if (baseBytes is null)
-            return;
+        var baseBytes = GetActiveLayerOrCurrentBytesOrThrow();
 
         var color = WithAlpha(Rgba32.FromHexOrDefault(_foregroundColorHex, new Rgba32(0, 0, 0, 255)), _foregroundAlpha);
 
@@ -884,7 +885,8 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
             return;
         }
 
-        await CommitHistoryAsync(next, "Text", preserveHandles: true);
+        ApplyToActiveLayerAndRefresh(next);
+        await CommitHistoryAsync(_viewBytes ?? next, "Text", preserveHandles: true);
         _status = "Text applied";
         RefreshFooter();
         NotifyAll();
@@ -1082,7 +1084,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         RefreshFooter();
         NotifyAll();
 
-        var baseBytes = CurrentBytes!;
+        var baseBytes = GetActiveLayerOrCurrentBytesOrThrow();
         byte[] next;
         try
         {
@@ -1096,7 +1098,8 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
             return;
         }
 
-    await CommitHistoryAsync(next, "Fill", preserveHandles: true);
+        ApplyToActiveLayerAndRefresh(next);
+        await CommitHistoryAsync(_viewBytes ?? next, "Fill", preserveHandles: true);
         _status = "Fill applied";
         RefreshFooter();
         NotifyAll();
@@ -1130,7 +1133,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         RefreshFooter();
         NotifyAll();
 
-        var baseBytes = CurrentBytes!;
+        var baseBytes = GetActiveLayerOrCurrentBytesOrThrow();
         byte[] next;
         try
         {
@@ -1148,7 +1151,8 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
             return;
         }
 
-    await CommitHistoryAsync(next, "Text", preserveHandles: true);
+        ApplyToActiveLayerAndRefresh(next);
+        await CommitHistoryAsync(_viewBytes ?? next, "Text", preserveHandles: true);
         _status = "Text applied";
         RefreshFooter();
         NotifyAll();
@@ -1223,7 +1227,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         RefreshFooter();
         NotifyAll();
 
-        var baseBytes = CurrentBytes!;
+        var baseBytes = GetActiveLayerOrCurrentBytesOrThrow();
         byte[] next;
         try
         {
@@ -1239,7 +1243,8 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
             return;
         }
 
-    await CommitHistoryAsync(next, "Blur", preserveHandles: true);
+        ApplyToActiveLayerAndRefresh(next);
+        await CommitHistoryAsync(_viewBytes ?? next, "Blur", preserveHandles: true);
         _status = "Blur applied";
         RefreshFooter();
         NotifyAll();
@@ -1273,7 +1278,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         RefreshFooter();
         NotifyAll();
 
-        var baseBytes = CurrentBytes!;
+        var baseBytes = GetActiveLayerOrCurrentBytesOrThrow();
         byte[] next;
         try
         {
@@ -1289,7 +1294,8 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
             return;
         }
 
-        await CommitHistoryAsync(next, "Sharpen", preserveHandles: true);
+        ApplyToActiveLayerAndRefresh(next);
+        await CommitHistoryAsync(_viewBytes ?? next, "Sharpen", preserveHandles: true);
         _status = "Sharpen applied";
         RefreshFooter();
         NotifyAll();
@@ -1504,7 +1510,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         RefreshFooter();
         NotifyAll();
 
-        var baseBytes = CurrentBytes!;
+        var baseBytes = GetActiveLayerOrCurrentBytesOrThrow();
         byte[] cropped;
         try
         {
@@ -1520,7 +1526,8 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
 
         _cropMode = false;
         _handles = new();
-        await CommitHistoryAsync(cropped, "Crop");
+        ApplyToActiveLayerAndRefresh(cropped);
+        await CommitHistoryAsync(_viewBytes ?? cropped, "Crop");
 
         _status = "Crop applied";
         RefreshFooter();
@@ -1547,7 +1554,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         RefreshFooter();
         NotifyAll();
 
-        var baseBytes = CurrentBytes!;
+        var baseBytes = GetActiveLayerOrCurrentBytesOrThrow();
         byte[] next;
         try
         {
@@ -1568,8 +1575,8 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
             return;
         }
 
-        await CommitHistoryAsync(next, stroke.Mode == CanvasInteractionMode.Eraser ? "Eraser" : "Brush");
-
+        ApplyToActiveLayerAndRefresh(next);
+        await CommitHistoryAsync(_viewBytes ?? next, stroke.Mode == CanvasInteractionMode.Eraser ? "Eraser" : "Brush");
         _status = "Stroke applied";
         RefreshFooter();
         NotifyAll();
@@ -1598,7 +1605,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         RefreshFooter();
         NotifyAll();
 
-        var baseBytes = CurrentBytes!;
+        var baseBytes = GetActiveLayerOrCurrentBytesOrThrow();
         byte[] warped;
         try
         {
@@ -1615,7 +1622,8 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         }
 
         _perspectiveMode = false;
-        await CommitHistoryAsync(warped, "Perspective");
+        ApplyToActiveLayerAndRefresh(warped);
+        await CommitHistoryAsync(_viewBytes ?? warped, "Perspective");
 
         _status = "Perspective applied";
         RefreshFooter();
@@ -1643,7 +1651,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         RefreshFooter();
         NotifyAll();
 
-        var baseBytes = CurrentBytes!;
+        var baseBytes = GetCompositedBytesOrFallback() ?? CurrentBytes;
         byte[] transformed;
         try
         {
@@ -1657,7 +1665,8 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
             return;
         }
 
-        await CommitHistoryAsync(transformed, label);
+        ApplyToActiveLayerAndRefresh(transformed);
+        await CommitHistoryAsync(_viewBytes ?? transformed, label);
 
         _status = "Transform applied";
         RefreshFooter();
@@ -1779,7 +1788,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
             {
                 await Task.Delay(250, token);
 
-                var baseBytes = CurrentBytes!;
+                var baseBytes = GetCompositedBytesOrFallback() ?? CurrentBytes!;
                 var settings = new ImageProcessorService.ProcessingSettings(
                     BlurKernelSize: _blurKernelSize,
                     Grayscale: _grayscale,
@@ -1811,6 +1820,9 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
                     return;
 
                 await CommitHistoryAsync(processed, "Filters", replaceCurrentIfSameLabel: true, preserveHandles: _cropMode || _selectionMode);
+                // Sync layers to the processed composite so subsequent per-layer operations start from this result.
+                LayersInitFromDocumentBytes(processed);
+
                 _status = "Updated";
                 RefreshFooter();
                 NotifyAll();
@@ -1884,7 +1896,8 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         _historyIndex = index;
 
         var bytes = CurrentBytes;
-        _viewBytes = bytes;
+        LayersInitFromDocumentBytes(bytes);
+        _viewBytes = GetCompositedBytesOrFallback() ?? bytes;
         (_imageWidth, _imageHeight) = await RunImageCpuAsync(() => _imageProcessor.GetSize(bytes), inProgressStatus: "Loading...");
         _handles = new();
 

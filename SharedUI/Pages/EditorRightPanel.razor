@@ -2,50 +2,89 @@
 @using SharedUI.Services
 
 <MudStack Spacing="2">
-    <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
-        <MudTooltip Text="Perspective Mode">
-            <MudIconButton Icon="@Icons.Material.Filled.Tune"
-                           Color="@(PerspectiveMode ? Color.Primary : Color.Inherit)"
-                           Style="@ToggleIconStyle(PerspectiveMode)"
-                           OnClick="TogglePerspectiveMode"
-                           aria-label="Toggle Perspective Mode" />
+    <MudDivider />
+    <MudText Typo="Typo.subtitle2">Layers</MudText>
+
+    <MudStack Row="true" Spacing="1">
+        <MudTooltip Text="Add Layer">
+            <MudIconButton Icon="@Icons.Material.Filled.Add"
+                           Disabled="@(!HasImage)"
+                           Color="@(HasImage ? Color.Primary : Color.Inherit)"
+                           Style="@ActionIconStyle(HasImage)"
+                           OnClick="@(async () => await AddLayer.InvokeAsync())"
+                           aria-label="Add Layer" />
         </MudTooltip>
 
-        <MudTooltip Text="Crop Mode">
-            <MudIconButton Icon="@Icons.Material.Filled.CropSquare"
-                           Color="@(CropMode ? Color.Primary : Color.Inherit)"
-                           Disabled="@PerspectiveMode"
-                           Style="@ToggleIconStyle(CropMode)"
-                           OnClick="ToggleCropMode"
-                           aria-label="Toggle Crop Mode" />
+        <MudTooltip Text="Duplicate Layer">
+            <MudIconButton Icon="@Icons.Material.Filled.ContentCopy"
+                           Disabled="@(!HasImage)"
+                           Color="@(HasImage ? Color.Primary : Color.Inherit)"
+                           Style="@ActionIconStyle(HasImage)"
+                           OnClick="@(async () => await DuplicateLayer.InvokeAsync())"
+                           aria-label="Duplicate Layer" />
+        </MudTooltip>
+
+        <MudTooltip Text="Merge Down">
+            <MudIconButton Icon="@Icons.Material.Filled.MergeType"
+                           Disabled="@(!HasImage || !CanMergeDown)"
+                           Color="@((HasImage && CanMergeDown) ? Color.Primary : Color.Inherit)"
+                           Style="@ActionIconStyle(HasImage && CanMergeDown)"
+                           OnClick="@(async () => await MergeDownLayer.InvokeAsync())"
+                           aria-label="Merge Down" />
+        </MudTooltip>
+
+        <MudTooltip Text="Delete Layer">
+            <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                           Disabled="@(!HasImage || !CanDeleteLayer)"
+                           Color="@((HasImage && CanDeleteLayer) ? Color.Primary : Color.Inherit)"
+                           Style="@ActionIconStyle(HasImage && CanDeleteLayer)"
+                           OnClick="@(async () => await DeleteLayer.InvokeAsync())"
+                           aria-label="Delete Layer" />
         </MudTooltip>
     </MudStack>
 
-    @if (PerspectiveMode)
+    @if (Layers is { Count: > 0 })
     {
-        <MudText Typo="Typo.caption">Drag the 4 points on the canvas, then apply.</MudText>
-        <MudTooltip Text="Apply Perspective">
-            <MudIconButton Icon="@Icons.Material.Filled.Check"
-                           Color="@(HasImage ? Color.Primary : Color.Inherit)"
-                           Disabled="@(!HasImage)"
-                           Style="@ActionIconStyle(HasImage)"
-                           OnClick="@(async () => await ApplyPerspective.InvokeAsync())"
-                           aria-label="Apply Perspective" />
-        </MudTooltip>
+        <MudStack Spacing="1">
+            @foreach (var layer in Layers)
+            {
+                var isActive = layer.Index == ActiveLayerIndex;
+                var canSelect = HasImage && layer.Visible;
+
+                <MudPaper Elevation="0" Class="pa-1" Style="@LayerItemStyle(isActive)">
+                    <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                        <button type="button"
+                                disabled="@(!HasImage || !CanToggleLayerVisibility)"
+                                @onclick="(async () => await ToggleLayerVisibility.InvokeAsync(layer.Index))"
+                                aria-label="Toggle Layer Visibility"
+                                style="background:transparent; border:0; padding:4px; cursor:pointer;">
+                            <MudIcon Icon="@(layer.Visible ? Icons.Material.Filled.Visibility : Icons.Material.Filled.VisibilityOff)" Size="Size.Small" />
+                        </button>
+
+                        <div style="flex:1; display:flex; align-items:center; gap:4px; cursor:@(canSelect ? "pointer" : "not-allowed"); opacity:@(layer.Visible ? "1" : "0.5");"
+                             @onclick="@(async () => { if (canSelect) await SelectLayerAsync(layer.Index); })">
+                            @if (isActive)
+                            {
+                                <MudIcon Icon="@Icons.Material.Filled.PlayArrow" Color="Color.Primary" Size="Size.Small" />
+                            }
+                            else
+                            {
+                                <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Inherit" Size="Size.Small" Style="opacity:0.25;" />
+                            }
+
+                            <MudText Typo="Typo.caption" Style="@(isActive ? "font-weight:600;" : null)">@layer.Name</MudText>
+                        </div>
+                     </MudStack>
+                 </MudPaper>
+            }
+        </MudStack>
+    }
+    else
+    {
+        <MudText Typo="Typo.caption" Style="opacity:0.6;">No layers</MudText>
     }
 
-    @if (CropMode)
-    {
-        <MudText Typo="Typo.caption">Drag the 4 corners, then apply crop.</MudText>
-        <MudTooltip Text="Apply Crop">
-            <MudIconButton Icon="@Icons.Material.Filled.Check"
-                           Color="@(HasImage ? Color.Primary : Color.Inherit)"
-                           Disabled="@(!HasImage)"
-                           Style="@ActionIconStyle(HasImage)"
-                           OnClick="@(async () => await ApplyCrop.InvokeAsync())"
-                           aria-label="Apply Crop" />
-        </MudTooltip>
-    }
+    <MudDivider />
 
     <MudText Typo="Typo.subtitle2">Transform</MudText>
     <MudStack Row="true" Spacing="1">
