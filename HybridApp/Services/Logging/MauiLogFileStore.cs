@@ -49,4 +49,20 @@ internal sealed class MauiLogFileStore : ILogFileStore
 
         return Task.CompletedTask;
     }
+
+    public async Task<string?> ReadAllTextAsync(DateOnly day, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var path = Path.Combine(_logDir, LogPath.DailyFileName(day));
+            if (!File.Exists(path))
+                return null;
+
+            return await File.ReadAllTextAsync(path, cancellationToken);
+        }
+        catch
+        {
+            return null;
+        }
+    }
 }

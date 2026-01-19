@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Components;
 using MudBlazor;
 using SharedUI.Components.Dialogs;
 using SharedUI.Mvvm;
+using SharedUI.Logging;
 using SharedUI.Services;
 using SharedUI.ViewModels;
 
@@ -10,6 +11,8 @@ namespace SharedUI.Pages;
 public partial class Editor : ViewModelComponentBase<EditorViewModel>
 {
     [CascadingParameter] public SharedUI.Layout.MainLayout? Layout { get; set; }
+
+    [Inject] private MogeLogService LogService { get; set; } = default!;
 
     private async Task OnNewClickedAsync()
     {
@@ -85,7 +88,7 @@ public partial class Editor : ViewModelComponentBase<EditorViewModel>
     }
 
     protected override EditorViewModel CreateViewModel()
-        => new(ImageFilePicker, Document, ImageProcessor, ImageExport);
+        => new(ImageFilePicker, Document, ImageProcessor, ImageExport, LogService);
 
     protected override void OnInitialized()
     {

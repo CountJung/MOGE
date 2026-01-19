@@ -32,6 +32,7 @@ builder.Services.AddSingleton(new MogeLogOptions(PlatformSubfolder: "web"));
 builder.Services.AddSingleton<ILogFileStore, BrowserLogFileStore>();
 builder.Services.AddSingleton<MogeLogService>();
 builder.Logging.Services.AddSingleton<ILoggerProvider, MogeFileLoggerProvider>();
+builder.Services.AddScoped<ILogExportService, BrowserLogExportService>();
 
 builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(builder.HostEnvironment.BaseAddress) });
 

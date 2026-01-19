@@ -1,5 +1,6 @@
-﻿@inject SharedUI.Logging.MogeLogService Log
-@inject Microsoft.JSInterop.IJSRuntime JS
+﻿@using SharedUI.Logging
+@inject MogeLogService Log
+@inject ILogExportService LogExport
 
 <ErrorBoundary @ref="_errorBoundary">
     <ChildContent>
@@ -51,7 +52,7 @@
     {
         try
         {
-            await JS.InvokeVoidAsync("mogeBrowserLog.downloadToday");
+            await LogExport.ExportLatestAsync($"moge-log-{DateOnly.FromDateTime(DateTime.Now):yyyy-MM-dd}.txt");
         }
         catch
         {

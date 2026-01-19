@@ -34,6 +34,7 @@ public static class MauiProgram
 		builder.Services.AddSingleton<ILogFileStore, MauiLogFileStore>();
 		builder.Services.AddSingleton<MogeLogService>();
 		builder.Logging.Services.AddSingleton<ILoggerProvider, MogeFileLoggerProvider>();
+		builder.Services.AddScoped<ILogExportService, WindowsLogExportService>();
 
 #if DEBUG
 		builder.Services.AddBlazorWebViewDeveloperTools();

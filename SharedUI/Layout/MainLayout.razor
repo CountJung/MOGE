@@ -2,11 +2,14 @@
 @implements IDisposable
 @using Microsoft.AspNetCore.Components.Web
 @using Microsoft.JSInterop
+@using SharedUI.Logging
 @using SharedUI.Services.Settings
 
 @inject AppSettingsService Settings
 @inject NavigationManager Nav
 @inject IJSRuntime JS
+@inject ILogExportService LogExport
+@inject MogeLogService LogService
 
 <CascadingValue Value="this" IsFixed="true">
     <MudThemeProvider IsDarkMode="_isDarkMode" />
@@ -84,6 +87,7 @@
 
     protected override async Task OnInitializedAsync()
     {
+        await LogService.InitializeAsync();
         await Settings.InitializeAsync();
         await ApplySettingsAsync(Settings.Current);
         Settings.Changed += OnSettingsChanged;
@@ -248,7 +252,8 @@
     {
         try
         {
-            await JS.InvokeVoidAsync("mogeBrowserLog.downloadToday");
+            var result = await LogExport.ExportLatestAsync($"moge-log-{DateOnly.FromDateTime(DateTime.Now):yyyy-MM-dd}.txt");
+            PushFooterMessage(result.Message);
         }
         catch
         {

@@ -51,5 +51,17 @@
 
         <MudText Typo="Typo.caption">Inertia decay per 16ms</MudText>
         <MudSlider T="double" Value="@Vm!.TouchInertiaDecayPer16ms" ValueChanged="Vm!.OnTouchInertiaDecayChanged" Min="0.80" Max="0.99" Step="0.005" Color="Color.Primary" Disabled="@(!Vm!.TouchInertiaEnabled)" />
+
+        <MudDivider />
+
+        <MudText Typo="Typo.subtitle1">Logs</MudText>
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Download" OnClick="Vm!.ExportLatestLogsAsync">
+            Export latest log
+        </MudButton>
+
+        @if (!string.IsNullOrWhiteSpace(Vm!.LogExportStatus))
+        {
+            <MudText Typo="Typo.caption">@Vm!.LogExportStatus</MudText>
+        }
     </MudStack>
 </MudPaper>

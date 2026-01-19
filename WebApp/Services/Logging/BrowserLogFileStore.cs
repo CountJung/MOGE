@@ -45,4 +45,20 @@ internal sealed class BrowserLogFileStore : ILogFileStore
         {
         }
     }
+
+    public async Task<string?> ReadAllTextAsync(DateOnly day, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return await _js.InvokeAsync<string?>(
+                "mogeLogger.readDailyLog",
+                cancellationToken,
+                _options.PlatformSubfolder,
+                day.ToString("yyyy-MM-dd"));
+        }
+        catch
+        {
+            return null;
+        }
+    }
 }

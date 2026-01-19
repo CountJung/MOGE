@@ -348,6 +348,26 @@ public sealed class ImageProcessorService
         return EncodeForDisplay(work);
     }
 
+    public byte[] ApplyPipelinePreview(byte[] imageBytes, ProcessingSettings settings, int maxSide = 1200)
+    {
+        if (imageBytes is null || imageBytes.Length == 0)
+            return imageBytes;
+
+        maxSide = Math.Clamp(maxSide, 256, 2048);
+
+        var (w, h) = GetSize(imageBytes);
+        if (w <= 0 || h <= 0)
+            return ApplyPipeline(imageBytes, settings);
+
+        var max = Math.Max(w, h);
+        if (max <= maxSide)
+            return ApplyPipeline(imageBytes, settings);
+
+        var scale = (double)maxSide / max;
+        var resized = ResizeByScale(imageBytes, scale);
+        return ApplyPipeline(resized, settings);
+    }
+
     public byte[] ToPng(byte[] imageBytes)
     {
         using var src = Decode(imageBytes);

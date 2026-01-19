@@ -52,30 +52,34 @@ window.mogeLogger = {
         }
       }
     }
-  }
-  ,
+  },
 
   readDailyLog: async (platformSubfolder, dayIso) => {
     const root = await window.mogeLogger._getRoot();
     const dir = await window.mogeLogger._getDir(root, ['moge-logs', platformSubfolder]);
     const fileName = `${window.mogeLogger._formatDate(dayIso)}.log`;
 
-    const fileHandle = await dir.getFileHandle(fileName, { create: false });
-    const file = await fileHandle.getFile();
-    return await file.text();
+    try {
+      const fileHandle = await dir.getFileHandle(fileName, { create: false });
+      const file = await fileHandle.getFile();
+      return await file.text();
+    } catch {
+      return null;
+    }
   },
 
-  downloadDailyLog: async (platformSubfolder, dayIso, filename) => {
-    const text = await window.mogeLogger.readDailyLog(platformSubfolder, dayIso);
-    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename || `${dayIso}.log`;
-    a.rel = 'noopener';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  downloadText: (fileName, text) => {
+    try {
+      const blob = new Blob([text ?? ''], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName || 'moge-log.txt';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+    }
   }
 };

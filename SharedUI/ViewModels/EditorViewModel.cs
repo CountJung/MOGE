@@ -1,7 +1,9 @@
 using Microsoft.AspNetCore.Components;
+using Microsoft.Extensions.Logging;
 using OpenCvSharp;
 using SharedUI.Components;
 using SharedUI.Mvvm;
+using SharedUI.Logging;
 using SharedUI.Services;
 
 namespace SharedUI.ViewModels;
@@ -12,6 +14,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     private readonly ImageDocumentState _document;
     private readonly ImageProcessorService _imageProcessor;
     private readonly IImageExportService _imageExport;
+    private readonly MogeLogService _log;
 
     private Action<string?> _pushFooterMessage;
 
@@ -81,6 +84,9 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
 
     private int _processingCount;
 
+    private const int FilterPreviewMaxSide = 1200;
+    private const int FilterPreviewThreshold = 1600;
+
     private sealed record LoadedImage(ImagePickResult Pick, string? ThumbnailDataUrl);
     private readonly List<LoadedImage> _loadedImages = new();
     private int _selectedLoadedIndex = -1;
@@ -90,12 +96,14 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         ImageDocumentState document,
         ImageProcessorService imageProcessor,
         IImageExportService imageExport,
+        MogeLogService log,
         Action<string?>? pushFooterMessage = null)
     {
         _imageFilePicker = imageFilePicker;
         _document = document;
         _imageProcessor = imageProcessor;
         _imageExport = imageExport;
+        _log = log;
         _pushFooterMessage = pushFooterMessage ?? (_ => { });
     }
 
@@ -499,6 +507,10 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
             _status = $"Saved: {fileName}{ext}";
             RefreshFooter();
             NotifyAll();
+        }
+        catch (Exception ex)
+        {
+            ReportError("저장 중 문제가 발생했습니다. 로그를 내보내기에서 확인해 주세요.", ex, "Save");
         }
         finally
         {
@@ -1782,63 +1794,106 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         _debounceCts = new CancellationTokenSource();
         var token = _debounceCts.Token;
 
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await Task.Delay(250, token);
-
-                var baseBytes = GetCompositedBytesOrFallback() ?? CurrentBytes!;
-                var settings = new ImageProcessorService.ProcessingSettings(
-                    BlurKernelSize: _blurKernelSize,
-                    Grayscale: _grayscale,
-                    Sepia: _sepia,
-                    Invert: _invert,
-                    Saturation: _saturation,
-                    Sketch: _sketch,
-                    Cartoon: _cartoon,
-                    Emboss: _emboss,
-                    SharpenAmount: _filterSharpenAmount,
-                    GlowStrength: _glowStrength,
-                    ColorMap: _colorMap,
-                    PosterizeLevels: _posterizeLevels,
-                    PixelizeBlockSize: _pixelizeBlockSize,
-                    VignetteStrength: _vignetteStrength,
-                    NoiseAmount: _noiseAmount,
-                    Canny: _canny,
-                    CannyThreshold1: _cannyT1,
-                    CannyThreshold2: _cannyT2,
-                    Contrast: _contrast,
-                    Brightness: _brightness);
-
-                var processed = await RunImageCpuAsync(
-                    () => _imageProcessor.ApplyPipeline(baseBytes, settings),
-                    inProgressStatus: "Processing...",
-                    ct: token);
-
-                if (token.IsCancellationRequested)
-                    return;
-
-                await CommitHistoryAsync(processed, "Filters", replaceCurrentIfSameLabel: true, preserveHandles: _cropMode || _selectionMode);
-                // Sync layers to the processed composite so subsequent per-layer operations start from this result.
-                LayersInitFromDocumentBytes(processed);
-
-                _status = "Updated";
-                RefreshFooter();
-                NotifyAll();
-            }
-            catch (OperationCanceledException)
-            {
-            }
-            catch (Exception ex)
-            {
-                _status = ex.Message;
-                RefreshFooter();
-                NotifyAll();
-            }
-        }, token);
+        _ = ApplyPipelineAsync(token);
 
         return Task.CompletedTask;
+    }
+
+    private ImageProcessorService.ProcessingSettings BuildProcessingSettings()
+        => new(
+            BlurKernelSize: _blurKernelSize,
+            Grayscale: _grayscale,
+            Sepia: _sepia,
+            Invert: _invert,
+            Saturation: _saturation,
+            Sketch: _sketch,
+            Cartoon: _cartoon,
+            Emboss: _emboss,
+            SharpenAmount: _filterSharpenAmount,
+            GlowStrength: _glowStrength,
+            ColorMap: _colorMap,
+            PosterizeLevels: _posterizeLevels,
+            PixelizeBlockSize: _pixelizeBlockSize,
+            VignetteStrength: _vignetteStrength,
+            NoiseAmount: _noiseAmount,
+            Canny: _canny,
+            CannyThreshold1: _cannyT1,
+            CannyThreshold2: _cannyT2,
+            Contrast: _contrast,
+            Brightness: _brightness);
+
+    private bool ShouldUseFilterPreview()
+    {
+        if (_imageWidth <= 0 || _imageHeight <= 0)
+            return false;
+
+        var maxSide = Math.Max(_imageWidth, _imageHeight);
+        return maxSide >= FilterPreviewThreshold;
+    }
+
+    private async Task ApplyPipelineAsync(CancellationToken token)
+    {
+        try
+        {
+            await Task.Delay(200, token);
+
+            var baseBytes = GetCompositedBytesOrFallback() ?? CurrentBytes!;
+            var settings = BuildProcessingSettings();
+
+            var usePreview = ShouldUseFilterPreview();
+            if (usePreview)
+            {
+                var preview = await RunImageCpuAsync(
+                    () => _imageProcessor.ApplyPipelinePreview(baseBytes, settings, FilterPreviewMaxSide),
+                    inProgressStatus: "Preview...",
+                    ct: token);
+
+                if (token.IsCancellationRequested || !HasImage)
+                    return;
+
+                _viewBytes = preview;
+                _status = "Preview";
+                RefreshFooter();
+                NotifyAll();
+
+                await Task.Delay(350, token);
+            }
+
+            var processed = await RunImageCpuAsync(
+                () => _imageProcessor.ApplyPipeline(baseBytes, settings),
+                inProgressStatus: "Processing...",
+                ct: token);
+
+            if (token.IsCancellationRequested)
+                return;
+
+            await CommitHistoryAsync(processed, "Filters", replaceCurrentIfSameLabel: true, preserveHandles: _cropMode || _selectionMode);
+            // Sync layers to the processed composite so subsequent per-layer operations start from this result.
+            LayersInitFromDocumentBytes(processed);
+
+            _status = "Updated";
+            RefreshFooter();
+            NotifyAll();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            ReportError("처리 중 문제가 발생했습니다. 로그를 내보내기에서 확인해 주세요.", ex, "Filter");
+        }
+    }
+
+    private void ReportError(string userMessage, Exception? ex = null, string category = "Editor")
+    {
+        _status = userMessage;
+        RefreshFooter();
+        NotifyAll();
+
+        if (ex is not null)
+            _log.Log(Microsoft.Extensions.Logging.LogLevel.Error, category, userMessage, ex);
+        else
+            _log.Log(Microsoft.Extensions.Logging.LogLevel.Error, category, userMessage);
     }
 
     private async Task CommitHistoryAsync(byte[] bytes, string label, bool replaceCurrentIfSameLabel = false, bool preserveHandles = false)
@@ -1935,7 +1990,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         _magicWandDebounceCts?.Dispose();
         _magicWandDebounceCts = null;
     }
-    //Model �������� �������� ����
+    //Model �������� �������� ����
     private sealed record LayerEntry(Guid Id, string Name, byte[] Bytes, bool Visible);
     private readonly List<LayerEntry> _layers = new();
     private int _activeLayerIndex = -1;

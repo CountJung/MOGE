@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Components;
 using Microsoft.JSInterop;
+using Microsoft.Extensions.Logging;
+using SharedUI.Logging;
 using SharedUI.Mvvm;
 using SharedUI.Services.Settings;
 
@@ -10,6 +12,8 @@ public sealed class SettingsViewModel : ObservableObject, IDisposable
     private readonly AppSettingsService _settingsService;
     private readonly NavigationManager _nav;
     private readonly IJSRuntime _js;
+    private readonly ILogExportService _logExport;
+    private readonly MogeLogService _log;
 
     private AppThemeMode _theme;
 
@@ -22,11 +26,15 @@ public sealed class SettingsViewModel : ObservableObject, IDisposable
     private double _touchInertiaStopSpeed;
     private double _touchInertiaDecayPer16ms;
 
-    public SettingsViewModel(AppSettingsService settingsService, NavigationManager nav, IJSRuntime js)
+    private string? _logExportStatus;
+
+    public SettingsViewModel(AppSettingsService settingsService, NavigationManager nav, IJSRuntime js, ILogExportService logExport, MogeLogService log)
     {
         _settingsService = settingsService;
         _nav = nav;
         _js = js;
+        _logExport = logExport;
+        _log = log;
     }
 
     public AppThemeMode Theme => _theme;
@@ -39,6 +47,8 @@ public sealed class SettingsViewModel : ObservableObject, IDisposable
     public double TouchInertiaStartSpeed => _touchInertiaStartSpeed;
     public double TouchInertiaStopSpeed => _touchInertiaStopSpeed;
     public double TouchInertiaDecayPer16ms => _touchInertiaDecayPer16ms;
+
+    public string? LogExportStatus => _logExportStatus;
 
     public async Task InitializeAsync()
     {
@@ -117,6 +127,22 @@ public sealed class SettingsViewModel : ObservableObject, IDisposable
         {
             // Fallback when history isn't available (e.g., direct landing).
             _nav.NavigateTo("");
+        }
+    }
+
+    public async Task ExportLatestLogsAsync()
+    {
+        try
+        {
+            var result = await _logExport.ExportLatestAsync($"moge-log-{DateOnly.FromDateTime(DateTime.Now):yyyy-MM-dd}.txt");
+            _logExportStatus = result.Message;
+            OnPropertyChanged(nameof(LogExportStatus));
+        }
+        catch (Exception ex)
+        {
+            _log.Log(LogLevel.Error, "Settings", "Log export failed", ex);
+            _logExportStatus = "로그 내보내기에 실패했습니다. 다시 시도해 주세요.";
+            OnPropertyChanged(nameof(LogExportStatus));
         }
     }
 
