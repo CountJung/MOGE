@@ -55,6 +55,9 @@ public partial class EditorRightPanel
     [Parameter] public ColorMapStyle ColorMap { get; set; }
     [Parameter] public EventCallback<ColorMapStyle> ColorMapChanged { get; set; }
 
+    [Parameter] public double ColorMapStrength { get; set; }
+    [Parameter] public EventCallback<double> ColorMapStrengthChanged { get; set; }
+
     [Parameter] public int PosterizeLevels { get; set; }
     [Parameter] public EventCallback<int> PosterizeLevelsChanged { get; set; }
 

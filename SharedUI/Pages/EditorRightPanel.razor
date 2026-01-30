@@ -126,17 +126,10 @@
                 <MudTooltip Text="Grayscale">
                     <MudIconButton Icon="@Icons.Material.Filled.MonochromePhotos"
                                    Color="@(Grayscale ? Color.Primary : Color.Inherit)"
-                                   Disabled="@Sepia"
-                                   Style="@ToggleIconStyle(Grayscale && !Sepia)"
+                                   Disabled="@(Sepia || ColorMap != ColorMapStyle.None)"
+                                   Style="@ToggleIconStyle(Grayscale && !Sepia && ColorMap == ColorMapStyle.None)"
                                    OnClick="ToggleGrayscale"
                                    aria-label="Toggle Grayscale" />
-                </MudTooltip>
-                <MudTooltip Text="Sepia">
-                    <MudIconButton Icon="@Icons.Material.Filled.FilterVintage"
-                                   Color="@(Sepia ? Color.Primary : Color.Inherit)"
-                                   Style="@ToggleIconStyle(Sepia)"
-                                   OnClick="ToggleSepia"
-                                   aria-label="Toggle Sepia" />
                 </MudTooltip>
                 <MudTooltip Text="Canny Edge">
                     <MudIconButton Icon="@Icons.Material.Filled.Timeline"
@@ -198,19 +191,85 @@
         </MudExpansionPanel>
 
         <MudExpansionPanel Text="Mood">
-            <MudText Typo="Typo.caption">Color Map</MudText>
-            <MudSelect T="ColorMapStyle" Value="@ColorMap" ValueChanged="ColorMapChanged" Dense="true" AnchorOrigin="Origin.BottomCenter">
-                <MudSelectItem T="ColorMapStyle" Value="@ColorMapStyle.None">None</MudSelectItem>
-                <MudSelectItem T="ColorMapStyle" Value="@ColorMapStyle.Autumn">Autumn</MudSelectItem>
-                <MudSelectItem T="ColorMapStyle" Value="@ColorMapStyle.Bone">Bone</MudSelectItem>
-                <MudSelectItem T="ColorMapStyle" Value="@ColorMapStyle.Ocean">Ocean</MudSelectItem>
-                <MudSelectItem T="ColorMapStyle" Value="@ColorMapStyle.Summer">Summer</MudSelectItem>
-                <MudSelectItem T="ColorMapStyle" Value="@ColorMapStyle.Hot">Hot</MudSelectItem>
-                <MudSelectItem T="ColorMapStyle" Value="@ColorMapStyle.Winter">Winter</MudSelectItem>
-                <MudSelectItem T="ColorMapStyle" Value="@ColorMapStyle.Jet">Jet</MudSelectItem>
-                <MudSelectItem T="ColorMapStyle" Value="@ColorMapStyle.Rainbow">Rainbow</MudSelectItem>
-                <MudSelectItem T="ColorMapStyle" Value="@ColorMapStyle.Pink">Pink</MudSelectItem>
-            </MudSelect>
+            <MudText Typo="Typo.caption">Color Map Style</MudText>
+            <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Class="flex-wrap">
+                <MudTooltip Text="None">
+                    <MudIconButton Icon="@Icons.Material.Filled.DoNotDisturb"
+                                   Color="@(ColorMap == ColorMapStyle.None ? Color.Primary : Color.Inherit)"
+                                   Style="@ToggleIconStyle(ColorMap == ColorMapStyle.None)"
+                                   OnClick="@(() => ColorMapChanged.InvokeAsync(ColorMapStyle.None))"
+                                   aria-label="No Color Map" />
+                </MudTooltip>
+                <MudTooltip Text="Sepia">
+                    <MudIconButton Icon="@Icons.Material.Filled.FilterVintage"
+                                   Color="@(Sepia ? Color.Primary : Color.Inherit)"
+                                   Style="@ToggleIconStyle(Sepia)"
+                                   OnClick="ToggleSepia"
+                                   aria-label="Toggle Sepia" />
+                </MudTooltip>
+                <MudTooltip Text="Autumn">
+                    <MudIconButton Icon="@Icons.Material.Filled.Park"
+                                   Color="@(ColorMap == ColorMapStyle.Autumn ? Color.Primary : Color.Inherit)"
+                                   Style="@ToggleIconStyle(ColorMap == ColorMapStyle.Autumn)"
+                                   OnClick="@(() => ColorMapChanged.InvokeAsync(ColorMapStyle.Autumn))"
+                                   aria-label="Autumn Color Map" />
+                </MudTooltip>
+                <MudTooltip Text="Ocean">
+                    <MudIconButton Icon="@Icons.Material.Filled.Water"
+                                   Color="@(ColorMap == ColorMapStyle.Ocean ? Color.Primary : Color.Inherit)"
+                                   Style="@ToggleIconStyle(ColorMap == ColorMapStyle.Ocean)"
+                                   OnClick="@(() => ColorMapChanged.InvokeAsync(ColorMapStyle.Ocean))"
+                                   aria-label="Ocean Color Map" />
+                </MudTooltip>
+                <MudTooltip Text="Summer">
+                    <MudIconButton Icon="@Icons.Material.Filled.WbSunny"
+                                   Color="@(ColorMap == ColorMapStyle.Summer ? Color.Primary : Color.Inherit)"
+                                   Style="@ToggleIconStyle(ColorMap == ColorMapStyle.Summer)"
+                                   OnClick="@(() => ColorMapChanged.InvokeAsync(ColorMapStyle.Summer))"
+                                   aria-label="Summer Color Map" />
+                </MudTooltip>
+                <MudTooltip Text="Winter">
+                    <MudIconButton Icon="@Icons.Material.Filled.AcUnit"
+                                   Color="@(ColorMap == ColorMapStyle.Winter ? Color.Primary : Color.Inherit)"
+                                   Style="@ToggleIconStyle(ColorMap == ColorMapStyle.Winter)"
+                                   OnClick="@(() => ColorMapChanged.InvokeAsync(ColorMapStyle.Winter))"
+                                   aria-label="Winter Color Map" />
+                </MudTooltip>
+                <MudTooltip Text="Hot">
+                    <MudIconButton Icon="@Icons.Material.Filled.Whatshot"
+                                   Color="@(ColorMap == ColorMapStyle.Hot ? Color.Primary : Color.Inherit)"
+                                   Style="@ToggleIconStyle(ColorMap == ColorMapStyle.Hot)"
+                                   OnClick="@(() => ColorMapChanged.InvokeAsync(ColorMapStyle.Hot))"
+                                   aria-label="Hot Color Map" />
+                </MudTooltip>
+                <MudTooltip Text="Jet">
+                    <MudIconButton Icon="@Icons.Material.Filled.LocalFireDepartment"
+                                   Color="@(ColorMap == ColorMapStyle.Jet ? Color.Primary : Color.Inherit)"
+                                   Style="@ToggleIconStyle(ColorMap == ColorMapStyle.Jet)"
+                                   OnClick="@(() => ColorMapChanged.InvokeAsync(ColorMapStyle.Jet))"
+                                   aria-label="Jet Color Map" />
+                </MudTooltip>
+                <MudTooltip Text="Rainbow">
+                    <MudIconButton Icon="@Icons.Material.Filled.FilterDrama"
+                                   Color="@(ColorMap == ColorMapStyle.Rainbow ? Color.Primary : Color.Inherit)"
+                                   Style="@ToggleIconStyle(ColorMap == ColorMapStyle.Rainbow)"
+                                   OnClick="@(() => ColorMapChanged.InvokeAsync(ColorMapStyle.Rainbow))"
+                                   aria-label="Rainbow Color Map" />
+                </MudTooltip>
+                <MudTooltip Text="Pink">
+                    <MudIconButton Icon="@Icons.Material.Filled.Favorite"
+                                   Color="@(ColorMap == ColorMapStyle.Pink ? Color.Primary : Color.Inherit)"
+                                   Style="@ToggleIconStyle(ColorMap == ColorMapStyle.Pink)"
+                                   OnClick="@(() => ColorMapChanged.InvokeAsync(ColorMapStyle.Pink))"
+                                   aria-label="Pink Color Map" />
+                </MudTooltip>
+            </MudStack>
+
+            @if (ColorMap != ColorMapStyle.None)
+            {
+                <MudText Typo="Typo.caption">Color Map Strength</MudText>
+                <MudSlider T="double" Value="@ColorMapStrength" ValueChanged="ColorMapStrengthChanged" Min="0" Max="1.0" Step="0.02" Color="Color.Primary" />
+            }
         </MudExpansionPanel>
 
         <MudExpansionPanel Text="Retro">

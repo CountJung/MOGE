@@ -311,22 +311,27 @@ internal static class RgbaImageOps
         return new RawRgbaImage(src.Width, src.Height, dst);
     }
 
-    public static RawRgbaImage ApplyColorMap(in RawRgbaImage src, ColorMapStyle style)
+    public static RawRgbaImage ApplyColorMap(in RawRgbaImage src, ColorMapStyle style, double strength = 1.0)
     {
-        if (style == ColorMapStyle.None)
+        if (style == ColorMapStyle.None || strength < 0.0001)
             return src;
 
+        strength = Math.Clamp(strength, 0.0, 1.0);
         var gray = ToGrayscaleBuffer(src);
-        var dst = new byte[src.RgbaBytes.Length];
+        var srcBytes = src.RgbaBytes;
+        var dst = new byte[srcBytes.Length];
+
         for (var i = 0; i < gray.Length; i++)
         {
             var v = gray[i];
             var (r, g, b) = MapColor(v, style);
             var o = i * 4;
-            dst[o + 0] = r;
-            dst[o + 1] = g;
-            dst[o + 2] = b;
-            dst[o + 3] = src.RgbaBytes[o + 3];
+
+            // Blend original with color map based on strength
+            dst[o + 0] = (byte)Math.Clamp((int)Math.Round(srcBytes[o + 0] * (1.0 - strength) + r * strength), 0, 255);
+            dst[o + 1] = (byte)Math.Clamp((int)Math.Round(srcBytes[o + 1] * (1.0 - strength) + g * strength), 0, 255);
+            dst[o + 2] = (byte)Math.Clamp((int)Math.Round(srcBytes[o + 2] * (1.0 - strength) + b * strength), 0, 255);
+            dst[o + 3] = srcBytes[o + 3];
         }
 
         return new RawRgbaImage(src.Width, src.Height, dst);

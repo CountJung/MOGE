@@ -25,7 +25,8 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     private bool _hasCanvas;
 
     private const int MaxHistoryEntries = 50;
-    private sealed record HistoryEntry(byte[] Bytes, string Label, DateTime Timestamp, string? ThumbnailDataUrl);
+    private sealed record LayerSnapshot(Guid Id, string Name, byte[] Bytes, bool Visible);
+    private sealed record HistoryEntry(byte[] Bytes, string Label, DateTime Timestamp, string? ThumbnailDataUrl, IReadOnlyList<LayerSnapshot>? Layers, int ActiveLayerIndex);
     private readonly List<HistoryEntry> _history = new();
     private int _historyIndex = -1;
 
@@ -69,6 +70,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     private double _filterSharpenAmount;
     private double _glowStrength;
     private ColorMapStyle _colorMap = ColorMapStyle.None;
+    private double _colorMapStrength = 1.0;
     private int _posterizeLevels;
     private int _pixelizeBlockSize;
     private double _vignetteStrength;
@@ -83,6 +85,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     private string? _status;
 
     private int _processingCount;
+    private readonly SemaphoreSlim _processingLock = new(1, 1);
 
     private const int FilterPreviewMaxSide = 1200;
     private const int FilterPreviewThreshold = 1600;
@@ -163,6 +166,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     public double FilterSharpenAmount => _filterSharpenAmount;
     public double GlowStrength => _glowStrength;
     public ColorMapStyle ColorMap => _colorMap;
+    public double ColorMapStrength => _colorMapStrength;
     public int PosterizeLevels => _posterizeLevels;
     public int PixelizeBlockSize => _pixelizeBlockSize;
     public double VignetteStrength => _vignetteStrength;
@@ -275,10 +279,10 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         if (_document.Bytes is { Length: > 0 } bytes)
         {
             // Avoid heavy work (decode/thumbnail/size) on UI thread.
-            _history.Add(new HistoryEntry(bytes, "Original", DateTime.UtcNow, null));
-            _historyIndex = 0;
-
             LayersInitFromDocumentBytes(bytes);
+            var layerSnapshots = CreateLayerSnapshots();
+            _history.Add(new HistoryEntry(bytes, "Original", DateTime.UtcNow, null, layerSnapshots, _activeLayerIndex));
+            _historyIndex = 0;
 
             _ = UpdateInitialImageMetaAsync(bytes);
         }
@@ -309,7 +313,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
             if (_history.Count > 0 && ReferenceEquals(_history[0].Bytes, bytes) && _history[0].Label == "Original")
             {
                 var old = _history[0];
-                _history[0] = new HistoryEntry(old.Bytes, old.Label, old.Timestamp, thumb);
+                _history[0] = new HistoryEntry(old.Bytes, old.Label, old.Timestamp, thumb, old.Layers, old.ActiveLayerIndex);
             }
 
             (_imageWidth, _imageHeight) = size;
@@ -541,6 +545,8 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
 
     private async Task<T> RunImageCpuAsync<T>(Func<T> op, string? inProgressStatus = null, CancellationToken ct = default)
     {
+        // Acquire lock to prevent concurrent image processing from left/right panels
+        await _processingLock.WaitAsync(ct);
         BeginProcessing(inProgressStatus);
         try
         {
@@ -549,6 +555,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         finally
         {
             EndProcessing();
+            _processingLock.Release();
         }
     }
 
@@ -1760,7 +1767,17 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
             _sepia = false;
             _sketch = false;
             _cartoon = false;
+            // When selecting a color map, set strength to 1.0 if it was 0
+            if (_colorMapStrength < 0.01)
+                _colorMapStrength = 1.0;
         }
+        NotifyAll();
+        return ApplyPipelineDebouncedAsync();
+    }
+
+    public Task OnColorMapStrengthChanged(double v)
+    {
+        _colorMapStrength = v;
         NotifyAll();
         return ApplyPipelineDebouncedAsync();
     }
@@ -1812,6 +1829,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
             SharpenAmount: _filterSharpenAmount,
             GlowStrength: _glowStrength,
             ColorMap: _colorMap,
+            ColorMapStrength: _colorMapStrength,
             PosterizeLevels: _posterizeLevels,
             PixelizeBlockSize: _pixelizeBlockSize,
             VignetteStrength: _vignetteStrength,
@@ -1867,9 +1885,9 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
             if (token.IsCancellationRequested)
                 return;
 
-            await CommitHistoryAsync(processed, "Filters", replaceCurrentIfSameLabel: true, preserveHandles: _cropMode || _selectionMode);
-            // Sync layers to the processed composite so subsequent per-layer operations start from this result.
-            LayersInitFromDocumentBytes(processed);
+            // Apply the processed result to the active layer (or all if only one layer exists)
+            ApplyToActiveLayerAndRefresh(processed);
+            await CommitHistoryAsync(_viewBytes ?? processed, "Filters", replaceCurrentIfSameLabel: true, preserveHandles: _cropMode || _selectionMode);
 
             _status = "Updated";
             RefreshFooter();
@@ -1908,13 +1926,15 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
             () => (_imageProcessor.CreateThumbnailDataUrl(bytes), _imageProcessor.GetSize(bytes)),
             inProgressStatus: null);
 
+        var layerSnapshots = CreateLayerSnapshots();
+
         if (replaceCurrentIfSameLabel && _historyIndex >= 0 && _historyIndex == _history.Count - 1 && _history[_historyIndex].Label == label)
         {
-            _history[_historyIndex] = new HistoryEntry(bytes, label, DateTime.UtcNow, thumb);
+            _history[_historyIndex] = new HistoryEntry(bytes, label, DateTime.UtcNow, thumb, layerSnapshots, _activeLayerIndex);
         }
         else
         {
-            _history.Add(new HistoryEntry(bytes, label, DateTime.UtcNow, thumb));
+            _history.Add(new HistoryEntry(bytes, label, DateTime.UtcNow, thumb, layerSnapshots, _activeLayerIndex));
             _historyIndex = _history.Count - 1;
 
             if (_history.Count > MaxHistoryEntries)
@@ -1950,8 +1970,20 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         _perspectiveMode = false;
         _historyIndex = index;
 
-        var bytes = CurrentBytes;
-        LayersInitFromDocumentBytes(bytes!);
+        var entry = _history[index];
+        var bytes = entry.Bytes;
+
+        // Restore layer state from history snapshot
+        if (entry.Layers is { Count: > 0 })
+        {
+            RestoreLayersFromSnapshots(entry.Layers, entry.ActiveLayerIndex);
+        }
+        else
+        {
+            // Fallback for old history entries without layer info
+            LayersInitFromDocumentBytes(bytes);
+        }
+
         _viewBytes = GetCompositedBytesOrFallback() ?? bytes;
         (_imageWidth, _imageHeight) = await RunImageCpuAsync(() => _imageProcessor.GetSize(bytes), inProgressStatus: "Loading...");
         _handles = new();
@@ -1989,6 +2021,8 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         _magicWandDebounceCts?.Cancel();
         _magicWandDebounceCts?.Dispose();
         _magicWandDebounceCts = null;
+
+        _processingLock.Dispose();
     }
     //Model �������� �������� ����
     private sealed record LayerEntry(Guid Id, string Name, byte[] Bytes, bool Visible);
@@ -2019,6 +2053,40 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
 
     private byte[]? ActiveLayerBytes
         => _activeLayerIndex >= 0 && _activeLayerIndex < _layers.Count ? _layers[_activeLayerIndex].Bytes : null;
+
+    private IReadOnlyList<LayerSnapshot> CreateLayerSnapshots()
+    {
+        if (_layers.Count == 0)
+            return Array.Empty<LayerSnapshot>();
+
+        var snapshots = new LayerSnapshot[_layers.Count];
+        for (var i = 0; i < _layers.Count; i++)
+        {
+            var layer = _layers[i];
+            // Deep copy bytes to preserve history state
+            var bytesCopy = new byte[layer.Bytes.Length];
+            Array.Copy(layer.Bytes, bytesCopy, layer.Bytes.Length);
+            snapshots[i] = new LayerSnapshot(layer.Id, layer.Name, bytesCopy, layer.Visible);
+        }
+        return snapshots;
+    }
+
+    private void RestoreLayersFromSnapshots(IReadOnlyList<LayerSnapshot>? snapshots, int activeIndex)
+    {
+        _layers.Clear();
+        if (snapshots is null || snapshots.Count == 0)
+        {
+            _activeLayerIndex = -1;
+            return;
+        }
+
+        foreach (var snapshot in snapshots)
+        {
+            _layers.Add(new LayerEntry(snapshot.Id, snapshot.Name, snapshot.Bytes, snapshot.Visible));
+        }
+        _activeLayerIndex = Math.Clamp(activeIndex, 0, _layers.Count - 1);
+        UpdateViewFromLayers();
+    }
 
     private void LayersReset()
     {

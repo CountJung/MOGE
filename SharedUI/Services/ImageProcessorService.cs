@@ -26,6 +26,7 @@ public sealed class ImageProcessorService
         double SharpenAmount,
         double GlowStrength,
         ColorMapStyle ColorMap,
+        double ColorMapStrength,
         int PosterizeLevels,
         int PixelizeBlockSize,
         double VignetteStrength,
@@ -253,7 +254,7 @@ public sealed class ImageProcessorService
             Cv2.LUT(work, lut, work);
         }
 
-        if (settings.ColorMap != ColorMapStyle.None)
+        if (settings.ColorMap != ColorMapStyle.None && settings.ColorMapStrength > 0.0001)
         {
             using var gray = new Mat();
             Cv2.CvtColor(work, gray, ColorConversionCodes.BGR2GRAY);
@@ -274,7 +275,10 @@ public sealed class ImageProcessorService
 
             using var dst = new Mat();
             Cv2.ApplyColorMap(gray, dst, cm);
-            dst.CopyTo(work);
+
+            // Blend with original based on ColorMapStrength (0.0 = original, 1.0 = full color map)
+            var strength = Math.Clamp(settings.ColorMapStrength, 0.0, 1.0);
+            Cv2.AddWeighted(work, 1.0 - strength, dst, strength, 0.0, work);
         }
 
         if (settings.VignetteStrength > 0.0001)
@@ -1840,8 +1844,8 @@ public sealed class ImageProcessorService
         if (settings.PosterizeLevels >= 2)
             work = Raw.RgbaImageOps.Posterize(work, settings.PosterizeLevels);
 
-        if (settings.ColorMap != ColorMapStyle.None)
-            work = Raw.RgbaImageOps.ApplyColorMap(work, settings.ColorMap);
+        if (settings.ColorMap != ColorMapStyle.None && settings.ColorMapStrength > 0.0001)
+            work = Raw.RgbaImageOps.ApplyColorMap(work, settings.ColorMap, settings.ColorMapStrength);
 
         if (settings.VignetteStrength > 0.0001)
             work = Raw.RgbaImageOps.Vignette(work, settings.VignetteStrength);

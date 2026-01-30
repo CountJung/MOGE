@@ -101,3 +101,163 @@
 ## 코딩 스타일
 - 불필요한 리팩터링/포맷 변경은 피하고, 기존 패턴(서비스 주입, MudBlazor 컴포넌트 사용)을 따릅니다.
 - `Mat` 등 `IDisposable` 객체는 반드시 `using`으로 정리합니다(네이티브 경로).
+
+## C# Best Practices (AI Agent 가이드)
+
+아래는 AI 에이전트/LLM이 코드를 생성하거나 리팩터링할 때 따라야 할 C# 및 .NET 성능 최적화 규칙입니다.
+
+### 1. Async/Await 패턴 (CRITICAL)
+
+#### 1.1 async void 금지
+- 이벤트 핸들러 외에는 `async void` 사용 금지
+- 항상 `async Task` 또는 `async ValueTask` 반환
+
+```csharp
+// ❌ Bad
+private async void LoadDataAsync() { ... }
+
+// ✅ Good
+private async Task LoadDataAsync() { ... }
+```
+
+#### 1.2 병렬 실행 (Task.WhenAll)
+- 독립적인 비동기 작업은 `Task.WhenAll`로 병렬 실행
+
+```csharp
+// ❌ Bad - 순차 실행
+var user = await GetUserAsync(id);
+var orders = await GetOrdersAsync(id);
+
+// ✅ Good - 병렬 실행
+var userTask = GetUserAsync(id);
+var ordersTask = GetOrdersAsync(id);
+await Task.WhenAll(userTask, ordersTask);
+```
+
+#### 1.3 .Result / .Wait() 금지
+- 데드락 방지를 위해 비동기 코드에서 `.Result` 또는 `.Wait()` 사용 금지
+- 항상 `await` 사용
+
+#### 1.4 ValueTask 활용
+- 캐시 히트 등 자주 동기적으로 완료되는 메서드는 `ValueTask<T>` 반환
+- 단, ValueTask는 한 번만 await 가능
+
+### 2. 메모리 관리 (CRITICAL)
+
+#### 2.1 ArrayPool 사용
+- 임시 버퍼는 `ArrayPool<T>.Shared`에서 Rent/Return
+
+```csharp
+// ✅ Good
+byte[] buffer = ArrayPool<byte>.Shared.Rent(8192);
+try { /* use buffer */ }
+finally { ArrayPool<byte>.Shared.Return(buffer); }
+```
+
+#### 2.2 Span<T> / Memory<T> 활용
+- 배열 슬라이싱 시 할당 없이 `Span<T>` 사용
+- 비동기 메서드에서는 `Memory<T>` 사용
+
+#### 2.3 IDisposable 정리
+- **반드시** `using` 선언으로 `IDisposable` 객체 정리
+- 특히 `Mat`, `Stream`, `HttpClient` 등
+
+```csharp
+// ✅ Good
+using var mat = new Mat();
+using var stream = new FileStream(path, FileMode.Open);
+```
+
+### 3. 컬렉션 성능 (HIGH)
+
+#### 3.1 용량 지정
+- 크기를 알 때 컬렉션 생성 시 용량 지정
+
+```csharp
+// ✅ Good
+var list = new List<int>(1000);
+var sb = new StringBuilder(estimatedLength);
+```
+
+#### 3.2 적절한 컬렉션 타입
+- 빠른 조회: `HashSet<T>`, `Dictionary<TKey, TValue>`
+- 순차 접근: `List<T>`
+- 정렬 유지: `SortedSet<T>`, `SortedDictionary<K,V>`
+
+#### 3.3 Hot Path에서 LINQ 주의
+- 성능 중요 구간에서는 LINQ 대신 for 루프 사용
+- `Any()` 대신 `Count > 0` 또는 직접 체크
+
+### 4. 문자열 처리 (MEDIUM)
+
+#### 4.1 StringBuilder 사용
+- 루프 내 문자열 연결은 `StringBuilder` 사용
+
+```csharp
+// ❌ Bad
+string result = "";
+for (int i = 0; i < 1000; i++)
+    result += i.ToString();
+
+// ✅ Good
+var sb = new StringBuilder(4000);
+for (int i = 0; i < 1000; i++)
+    sb.Append(i);
+```
+
+### 5. 동시성 (MEDIUM)
+
+#### 5.1 SemaphoreSlim 사용
+- 비동기 동기화에는 `SemaphoreSlim` 사용 (`lock` 대신)
+
+```csharp
+private readonly SemaphoreSlim _lock = new(1, 1);
+
+public async Task ProcessAsync()
+{
+    await _lock.WaitAsync();
+    try { /* critical section */ }
+    finally { _lock.Release(); }
+}
+```
+
+#### 5.2 CancellationToken 전파
+- 비동기 메서드는 `CancellationToken` 매개변수 수용 및 전파
+
+### 6. 기타 패턴
+
+#### 6.1 record 타입 활용
+- DTO, 불변 데이터는 `record` 사용
+
+```csharp
+// ✅ Good
+public record UserDto(int Id, string Name);
+public record struct Point(int X, int Y);
+```
+
+#### 6.2 정적 람다
+- 캡처 없는 람다는 `static` 키워드 사용
+
+```csharp
+// ✅ Good
+items.ForEach(static item => Process(item));
+```
+
+### 요약 체크리스트
+
+**Critical (필수)**
+- ✅ `async void` 금지 (이벤트 핸들러 제외)
+- ✅ `Task.WhenAll`로 병렬 실행
+- ✅ `.Result` / `.Wait()` 금지
+- ✅ `IDisposable` 반드시 `using`으로 정리
+
+**High (권장)**
+- ✅ 임시 버퍼에 `ArrayPool` 사용
+- ✅ 컬렉션 용량 사전 지정
+- ✅ 적절한 컬렉션 타입 선택
+
+**Medium (상황에 따라)**
+- ✅ Hot Path에서 LINQ 대신 루프
+- ✅ 루프 내 문자열 연결에 `StringBuilder`
+- ✅ 비동기 동기화에 `SemaphoreSlim`
+
