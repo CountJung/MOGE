@@ -44,15 +44,6 @@ public partial class EditorToolBar
 
     [Parameter] public bool CanFillSelection { get; set; }
 
-    [Parameter] public string TextInput { get; set; } = string.Empty;
-    [Parameter] public EventCallback<string> TextInputChanged { get; set; }
-
-    [Parameter] public int TextSize { get; set; } = 1;
-    [Parameter] public EventCallback<int> TextSizeChanged { get; set; }
-
-    [Parameter] public int TextThickness { get; set; } = 2;
-    [Parameter] public EventCallback<int> TextThicknessChanged { get; set; }
-
     [Parameter] public int MagicWandTolerance { get; set; }
     [Parameter] public EventCallback<int> MagicWandToleranceChanged { get; set; }
 

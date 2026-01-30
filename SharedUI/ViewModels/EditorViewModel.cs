@@ -87,6 +87,12 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     private int _processingCount;
     private readonly SemaphoreSlim _processingLock = new(1, 1);
 
+    /// <summary>
+    /// Callback to request text input from UI (invoked from Text tool on canvas click).
+    /// Parameters: (initialText, fontSize, thickness, colorHex, alpha) -> (text, fontSize, thickness, colorHex, alpha)? or null if canceled.
+    /// </summary>
+    private Func<string, int, int, string, int, Task<(string Text, int FontSize, int Thickness, string ColorHex, int Alpha)?>>? _requestTextInput;
+
     private const int FilterPreviewMaxSide = 1200;
     private const int FilterPreviewThreshold = 1600;
 
@@ -223,6 +229,9 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
 
     public void SetFooterPusher(Action<string?>? pushFooterMessage)
         => _pushFooterMessage = pushFooterMessage ?? (_ => { });
+
+    public void SetTextInputRequester(Func<string, int, int, string, int, Task<(string Text, int FontSize, int Thickness, string ColorHex, int Alpha)?>>? requester)
+        => _requestTextInput = requester;
 
     public void Initialize()
     {
@@ -870,6 +879,42 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     {
         if (!HasImage)
             return;
+
+        // Request text input from UI via dialog callback
+        if (_requestTextInput is null)
+        {
+            // Fallback: use pre-entered text if dialog not available (e.g., tests)
+            if (string.IsNullOrWhiteSpace(_textInput))
+            {
+                _status = "Text is empty";
+                RefreshFooter();
+                NotifyAll();
+                return;
+            }
+        }
+        else
+        {
+            // Show dialog to input text
+            var inputResult = await _requestTextInput(
+                _textInput,
+                _textSize,
+                _textThickness,
+                _foregroundColorHex,
+                _foregroundAlpha);
+
+            if (inputResult is null)
+            {
+                // User canceled
+                return;
+            }
+
+            // Update text settings from dialog result
+            _textInput = inputResult.Value.Text;
+            _textSize = inputResult.Value.FontSize;
+            _textThickness = inputResult.Value.Thickness;
+            _foregroundColorHex = inputResult.Value.ColorHex;
+            _foregroundAlpha = inputResult.Value.Alpha;
+        }
 
         if (string.IsNullOrWhiteSpace(_textInput))
         {

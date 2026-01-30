@@ -1,0 +1,101 @@
+@using MudBlazor
+@using MudBlazor.Utilities
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            <MudIcon Icon="@Icons.Material.Filled.TextFields" Class="mr-2" />
+            텍스트 입력
+        </MudText>
+    </TitleContent>
+
+    <DialogContent>
+        <MudStack Spacing="2">
+            <MudTextField T="string"
+                          @bind-Value="_text"
+                          Label="텍스트"
+                          Placeholder="입력할 텍스트..."
+                          Variant="Variant.Outlined"
+                          Lines="3"
+                          AutoFocus="true"
+                          Immediate="true" />
+
+            <MudAlert Severity="Severity.Info" Dense="true" Class="mb-2">
+                현재 ASCII 문자(영문, 숫자, 기호)만 지원됩니다. 한글 지원은 추후 추가 예정입니다.
+            </MudAlert>
+
+            <MudStack Row="true" Spacing="2">
+                <MudNumericField T="int"
+                                 @bind-Value="_fontSize"
+                                 Label="크기"
+                                 Variant="Variant.Outlined"
+                                 Min="1"
+                                 Max="8"
+                                 Style="width:100px;" />
+
+                <MudNumericField T="int"
+                                 @bind-Value="_thickness"
+                                 Label="두께"
+                                 Variant="Variant.Outlined"
+                                 Min="1"
+                                 Max="6"
+                                 Style="width:100px;" />
+            </MudStack>
+
+            <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+                <MudText Typo="Typo.body2">색상:</MudText>
+                <MudColorPicker @bind-Value="_color"
+                                PickerVariant="PickerVariant.Inline"
+                                Style="max-width:220px;" />
+            </MudStack>
+        </MudStack>
+    </DialogContent>
+
+    <DialogActions>
+        <MudButton OnClick="Cancel">취소</MudButton>
+        <MudButton Color="Color.Primary"
+                   Variant="Variant.Filled"
+                   Disabled="@string.IsNullOrWhiteSpace(_text)"
+                   OnClick="Ok">
+            적용
+        </MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    public sealed record Result(string Text, int FontSize, int Thickness, string ColorHex, int Alpha);
+
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+
+    [Parameter] public string InitialText { get; set; } = string.Empty;
+    [Parameter] public int InitialFontSize { get; set; } = 2;
+    [Parameter] public int InitialThickness { get; set; } = 2;
+    [Parameter] public string InitialColorHex { get; set; } = "#000000";
+    [Parameter] public int InitialAlpha { get; set; } = 255;
+
+    private string _text = string.Empty;
+    private int _fontSize = 2;
+    private int _thickness = 2;
+    private MudColor _color = new MudColor("#000000FF");
+
+    protected override void OnInitialized()
+    {
+        _text = InitialText ?? string.Empty;
+        _fontSize = Math.Clamp(InitialFontSize, 1, 8);
+        _thickness = Math.Clamp(InitialThickness, 1, 6);
+
+        // Convert hex + alpha to MudColor
+        var hex = InitialColorHex ?? "#000000";
+        var alpha = Math.Clamp(InitialAlpha, 0, 255);
+        _color = new MudColor(hex).SetAlpha(alpha);
+    }
+
+    private void Cancel() => MudDialog.Cancel();
+
+    private void Ok()
+    {
+        var hex = _color.ToString(MudColorOutputFormats.Hex);
+        var alpha = (int)Math.Round((double)_color.A);
+        MudDialog.Close(DialogResult.Ok(new Result(_text, _fontSize, _thickness, hex, alpha)));
+    }
+}

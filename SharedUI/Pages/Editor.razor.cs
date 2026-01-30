@@ -14,6 +14,42 @@ public partial class Editor : ViewModelComponentBase<EditorViewModel>
 
     [Inject] private MogeLogService LogService { get; set; } = default!;
 
+    private async Task<(string Text, int FontSize, int Thickness, string ColorHex, int Alpha)?> RequestTextInputAsync(
+        string initialText, int fontSize, int thickness, string colorHex, int alpha)
+    {
+        if (DialogService is null)
+            return null;
+
+        var parameters = new DialogParameters
+        {
+            [nameof(TextInputDialog.InitialText)] = initialText,
+            [nameof(TextInputDialog.InitialFontSize)] = fontSize,
+            [nameof(TextInputDialog.InitialThickness)] = thickness,
+            [nameof(TextInputDialog.InitialColorHex)] = colorHex,
+            [nameof(TextInputDialog.InitialAlpha)] = alpha,
+        };
+
+        var options = new DialogOptions
+        {
+            CloseOnEscapeKey = true,
+            MaxWidth = MaxWidth.Small,
+            FullWidth = true
+        };
+
+        var dialog = await DialogService.ShowAsync<TextInputDialog>("Text", parameters, options);
+        if (dialog is null)
+            return null;
+
+        var result = await dialog.Result;
+        if (result is null || result.Canceled)
+            return null;
+
+        if (result.Data is not TextInputDialog.Result data)
+            return null;
+
+        return (data.Text, data.FontSize, data.Thickness, data.ColorHex, data.Alpha);
+    }
+
     private async Task OnNewClickedAsync()
     {
         if (Vm is null)
@@ -101,6 +137,7 @@ public partial class Editor : ViewModelComponentBase<EditorViewModel>
         base.OnAfterRender(firstRender);
 
         Vm!.SetFooterPusher(msg => Layout?.PushFooterMessage(msg));
+        Vm!.SetTextInputRequester(RequestTextInputAsync);
 
         if (Layout is not null && !Vm.LayoutShortcutsSubscribed)
         {

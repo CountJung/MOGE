@@ -122,13 +122,11 @@
         <MudSlider T="double" Value="@SharpenAmount" ValueChanged="SharpenAmountChanged" Min="0" Max="3" Step="0.1" Color="Color.Primary"
                    Disabled="@(!HasImage || !SelectionMode)" />
 
-        <MudText Typo="Typo.caption">Text</MudText>
-        <MudTextField T="string" Value="@TextInput" ValueChanged="TextInputChanged" Placeholder="Text" Disabled="@(!HasImage)" Immediate="true" />
-
-        <MudText Typo="Typo.caption">Text size</MudText>
-        <MudSlider T="int" Value="@TextSize" ValueChanged="TextSizeChanged" Min="1" Max="8" Step="1" Color="Color.Primary" Disabled="@(!HasImage)" />
-
-        <MudText Typo="Typo.caption">Text thickness</MudText>
-        <MudSlider T="int" Value="@TextThickness" ValueChanged="TextThicknessChanged" Min="1" Max="6" Step="1" Color="Color.Primary" Disabled="@(!HasImage)" />
+        @if (InteractionMode == SharedUI.Components.CanvasInteractionMode.Text)
+        {
+            <MudAlert Severity="Severity.Info" Dense="true" Class="mt-2">
+                이미지를 클릭하여 텍스트를 입력하세요.
+            </MudAlert>
+        }
     </MudStack>
 </MudPaper>
