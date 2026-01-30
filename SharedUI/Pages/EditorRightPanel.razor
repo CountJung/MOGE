@@ -3,88 +3,6 @@
 
 <MudStack Spacing="2">
     <MudDivider />
-    <MudText Typo="Typo.subtitle2">Layers</MudText>
-
-    <MudStack Row="true" Spacing="1">
-        <MudTooltip Text="Add Layer">
-            <MudIconButton Icon="@Icons.Material.Filled.Add"
-                           Disabled="@(!HasImage)"
-                           Color="@(HasImage ? Color.Primary : Color.Inherit)"
-                           Style="@ActionIconStyle(HasImage)"
-                           OnClick="@(async () => await AddLayer.InvokeAsync())"
-                           aria-label="Add Layer" />
-        </MudTooltip>
-
-        <MudTooltip Text="Duplicate Layer">
-            <MudIconButton Icon="@Icons.Material.Filled.ContentCopy"
-                           Disabled="@(!HasImage)"
-                           Color="@(HasImage ? Color.Primary : Color.Inherit)"
-                           Style="@ActionIconStyle(HasImage)"
-                           OnClick="@(async () => await DuplicateLayer.InvokeAsync())"
-                           aria-label="Duplicate Layer" />
-        </MudTooltip>
-
-        <MudTooltip Text="Merge Down">
-            <MudIconButton Icon="@Icons.Material.Filled.MergeType"
-                           Disabled="@(!HasImage || !CanMergeDown)"
-                           Color="@((HasImage && CanMergeDown) ? Color.Primary : Color.Inherit)"
-                           Style="@ActionIconStyle(HasImage && CanMergeDown)"
-                           OnClick="@(async () => await MergeDownLayer.InvokeAsync())"
-                           aria-label="Merge Down" />
-        </MudTooltip>
-
-        <MudTooltip Text="Delete Layer">
-            <MudIconButton Icon="@Icons.Material.Filled.Delete"
-                           Disabled="@(!HasImage || !CanDeleteLayer)"
-                           Color="@((HasImage && CanDeleteLayer) ? Color.Primary : Color.Inherit)"
-                           Style="@ActionIconStyle(HasImage && CanDeleteLayer)"
-                           OnClick="@(async () => await DeleteLayer.InvokeAsync())"
-                           aria-label="Delete Layer" />
-        </MudTooltip>
-    </MudStack>
-
-    @if (Layers is { Count: > 0 })
-    {
-        <MudStack Spacing="1">
-            @foreach (var layer in Layers)
-            {
-                var isActive = layer.Index == ActiveLayerIndex;
-                var canSelect = HasImage && layer.Visible;
-
-                <MudPaper Elevation="0" Class="pa-1" Style="@LayerItemStyle(isActive)">
-                    <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
-                        <button type="button"
-                                disabled="@(!HasImage || !CanToggleLayerVisibility)"
-                                @onclick="(async () => await ToggleLayerVisibility.InvokeAsync(layer.Index))"
-                                aria-label="Toggle Layer Visibility"
-                                style="background:transparent; border:0; padding:4px; cursor:pointer;">
-                            <MudIcon Icon="@(layer.Visible ? Icons.Material.Filled.Visibility : Icons.Material.Filled.VisibilityOff)" Size="Size.Small" />
-                        </button>
-
-                        <div style="flex:1; display:flex; align-items:center; gap:4px; cursor:@(canSelect ? "pointer" : "not-allowed"); opacity:@(layer.Visible ? "1" : "0.5");"
-                             @onclick="@(async () => { if (canSelect) await SelectLayerAsync(layer.Index); })">
-                            @if (isActive)
-                            {
-                                <MudIcon Icon="@Icons.Material.Filled.PlayArrow" Color="Color.Primary" Size="Size.Small" />
-                            }
-                            else
-                            {
-                                <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Inherit" Size="Size.Small" Style="opacity:0.25;" />
-                            }
-
-                            <MudText Typo="Typo.caption" Style="@(isActive ? "font-weight:600;" : null)">@layer.Name</MudText>
-                        </div>
-                     </MudStack>
-                 </MudPaper>
-            }
-        </MudStack>
-    }
-    else
-    {
-        <MudText Typo="Typo.caption" Style="opacity:0.6;">No layers</MudText>
-    }
-
-    <MudDivider />
 
     <MudText Typo="Typo.subtitle2">Transform</MudText>
     <MudStack Row="true" Spacing="1">
@@ -296,7 +214,87 @@
             <MudSlider T="double" Value="@NoiseAmount" ValueChanged="NoiseAmountChanged" Min="0" Max="1.0" Step="0.02" Color="Color.Primary" />
         </MudExpansionPanel>
     </MudExpansionPanels>
+    <MudDivider />
+    <MudText Typo="Typo.subtitle2">Layers</MudText>
 
+    <MudStack Row="true" Spacing="1">
+        <MudTooltip Text="Add Layer">
+            <MudIconButton Icon="@Icons.Material.Filled.Add"
+                           Disabled="@(!HasImage)"
+                           Color="@(HasImage ? Color.Primary : Color.Inherit)"
+                           Style="@ActionIconStyle(HasImage)"
+                           OnClick="@(async () => await AddLayer.InvokeAsync())"
+                           aria-label="Add Layer" />
+        </MudTooltip>
+
+        <MudTooltip Text="Duplicate Layer">
+            <MudIconButton Icon="@Icons.Material.Filled.ContentCopy"
+                           Disabled="@(!HasImage)"
+                           Color="@(HasImage ? Color.Primary : Color.Inherit)"
+                           Style="@ActionIconStyle(HasImage)"
+                           OnClick="@(async () => await DuplicateLayer.InvokeAsync())"
+                           aria-label="Duplicate Layer" />
+        </MudTooltip>
+
+        <MudTooltip Text="Merge Down">
+            <MudIconButton Icon="@Icons.Material.Filled.MergeType"
+                           Disabled="@(!HasImage || !CanMergeDown)"
+                           Color="@((HasImage && CanMergeDown) ? Color.Primary : Color.Inherit)"
+                           Style="@ActionIconStyle(HasImage && CanMergeDown)"
+                           OnClick="@(async () => await MergeDownLayer.InvokeAsync())"
+                           aria-label="Merge Down" />
+        </MudTooltip>
+
+        <MudTooltip Text="Delete Layer">
+            <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                           Disabled="@(!HasImage || !CanDeleteLayer)"
+                           Color="@((HasImage && CanDeleteLayer) ? Color.Primary : Color.Inherit)"
+                           Style="@ActionIconStyle(HasImage && CanDeleteLayer)"
+                           OnClick="@(async () => await DeleteLayer.InvokeAsync())"
+                           aria-label="Delete Layer" />
+        </MudTooltip>
+    </MudStack>
+
+    @if (Layers is { Count: > 0 })
+    {
+        <MudStack Spacing="1">
+            @foreach (var layer in Layers)
+            {
+                var isActive = layer.Index == ActiveLayerIndex;
+                var canSelect = HasImage && layer.Visible;
+
+                <MudPaper Elevation="0" Class="pa-1" Style="@LayerItemStyle(isActive)">
+                    <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center">
+                        <button type="button"
+                                disabled="@(!HasImage || !CanToggleLayerVisibility)"
+                                @onclick="(async () => await ToggleLayerVisibility.InvokeAsync(layer.Index))"
+                                aria-label="Toggle Layer Visibility"
+                                style="background:transparent; border:0; padding:4px; cursor:pointer;">
+                            <MudIcon Icon="@(layer.Visible ? Icons.Material.Filled.Visibility : Icons.Material.Filled.VisibilityOff)" Size="Size.Small" />
+                        </button>
+
+                        <div style="flex:1; display:flex; align-items:center; gap:4px; cursor:@(canSelect ? "pointer" : "not-allowed"); opacity:@(layer.Visible ? "1" : "0.5");"
+                             @onclick="@(async () => { if (canSelect) await SelectLayerAsync(layer.Index); })">
+                            @if (isActive)
+                            {
+                                <MudIcon Icon="@Icons.Material.Filled.PlayArrow" Color="Color.Primary" Size="Size.Small" />
+                            }
+                            else
+                            {
+                                <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Inherit" Size="Size.Small" Style="opacity:0.25;" />
+                            }
+
+                            <MudText Typo="Typo.caption" Style="@(isActive ? "font-weight:600;" : null)">@layer.Name</MudText>
+                        </div>
+                     </MudStack>
+                 </MudPaper>
+            }
+        </MudStack>
+    }
+    else
+    {
+        <MudText Typo="Typo.caption" Style="opacity:0.6;">No layers</MudText>
+    }
     <MudDivider />
     <MudText Typo="Typo.subtitle2">History</MudText>
     <MudStack Row="true" Spacing="1">
