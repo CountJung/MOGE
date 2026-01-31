@@ -24,11 +24,8 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     private ElementReference _canvas;
     private bool _hasCanvas;
 
-    private const int MaxHistoryEntries = 50;
-    private sealed record LayerSnapshot(Guid Id, string Name, byte[] Bytes, bool Visible);
-    private sealed record HistoryEntry(byte[] Bytes, string Label, DateTime Timestamp, string? ThumbnailDataUrl, IReadOnlyList<LayerSnapshot>? Layers, int ActiveLayerIndex);
-    private readonly List<HistoryEntry> _history = new();
-    private int _historyIndex = -1;
+    private const int MaxLayerHistoryEntries = 30;
+    private sealed record LayerHistoryEntry(byte[] Bytes, string Label, DateTime Timestamp, string? ThumbnailDataUrl);
 
     private bool _perspectiveMode;
     private bool _cropMode;
@@ -185,10 +182,19 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
 
     public int SelectedLoadedIndex => _selectedLoadedIndex;
 
-    public bool CanUndo => HasImage && _historyIndex > 0;
-    public bool CanRedo => HasImage && _historyIndex >= 0 && _historyIndex < _history.Count - 1;
+    public bool CanUndo => HasActiveLayer && GetActiveLayerHistoryIndex() > 0;
+    public bool CanRedo
+    {
+        get
+        {
+            if (!HasActiveLayer) return false;
+            var layer = GetActiveLayerInternal();
+            if (layer is null) return false;
+            return layer.HistoryIndex >= 0 && layer.HistoryIndex < layer.History.Count - 1;
+        }
+    }
 
-    public int CurrentHistoryIndex => _historyIndex;
+    public int CurrentHistoryIndex => GetActiveLayerHistoryIndex();
 
     public IReadOnlyList<EditorHistoryListItem> HistoryItems => GetHistoryItems();
 
@@ -223,9 +229,16 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     }
 
     private byte[]? CurrentBytes
-        => _historyIndex >= 0 && _historyIndex < _history.Count
-            ? _history[_historyIndex].Bytes
-            : _document.Bytes;
+    {
+        get
+        {
+            // Prefer active layer bytes, fallback to document
+            var layerBytes = ActiveLayerBytes;
+            if (layerBytes is { Length: > 0 })
+                return layerBytes;
+            return _document.Bytes;
+        }
+    }
 
     public void SetFooterPusher(Action<string?>? pushFooterMessage)
         => _pushFooterMessage = pushFooterMessage ?? (_ => { });
@@ -259,9 +272,6 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         _cropMode = false;
         _selectionMode = false;
 
-        _history.Clear();
-        _historyIndex = -1;
-
         _blurKernelSize = 0;
         _grayscale = false;
         _sepia = false;
@@ -287,12 +297,8 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
 
         if (_document.Bytes is { Length: > 0 } bytes)
         {
-            // Avoid heavy work (decode/thumbnail/size) on UI thread.
+            // Initialize layers from document bytes (includes initial history)
             LayersInitFromDocumentBytes(bytes);
-            var layerSnapshots = CreateLayerSnapshots();
-            _history.Add(new HistoryEntry(bytes, "Original", DateTime.UtcNow, null, layerSnapshots, _activeLayerIndex));
-            _historyIndex = 0;
-
             _ = UpdateInitialImageMetaAsync(bytes);
         }
 
@@ -319,10 +325,12 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
             if (CurrentBytes is not { Length: > 0 } current || !ReferenceEquals(current, bytes))
                 return;
 
-            if (_history.Count > 0 && ReferenceEquals(_history[0].Bytes, bytes) && _history[0].Label == "Original")
+            // Update the first history entry's thumbnail for the active layer
+            var layer = GetActiveLayerInternal();
+            if (layer is not null && layer.History.Count > 0 && ReferenceEquals(layer.History[0].Bytes, bytes))
             {
-                var old = _history[0];
-                _history[0] = new HistoryEntry(old.Bytes, old.Label, old.Timestamp, thumb, old.Layers, old.ActiveLayerIndex);
+                var old = layer.History[0];
+                layer.History[0] = new LayerHistoryEntry(old.Bytes, old.Label, old.Timestamp, thumb);
             }
 
             (_imageWidth, _imageHeight) = size;
@@ -385,8 +393,12 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         _selectionPreviewHandles = new();
         _selectionPreviewPolygonPoints = new();
 
-        _history.Clear();
-        _historyIndex = -1;
+        // Reset all layer histories
+        foreach (var layer in _layers)
+        {
+            layer.History.Clear();
+            layer.HistoryIndex = -1;
+        }
 
         _viewBytes = CurrentBytes;
         _status = null;
@@ -434,8 +446,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
             _selectedLoadedIndex = -1;
             _document.Clear();
             _viewBytes = null;
-            _history.Clear();
-            _historyIndex = -1;
+            LayersReset();
             _handles = new();
             _selectionMask = null;
             _selectionPreviewHandles = new();
@@ -570,12 +581,13 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
 
     private IReadOnlyList<EditorHistoryListItem> GetHistoryItems()
     {
-        if (_history.Count == 0)
+        var layer = GetActiveLayerInternal();
+        if (layer is null || layer.History.Count == 0)
             return Array.Empty<EditorHistoryListItem>();
 
-        var items = new List<EditorHistoryListItem>(_history.Count);
-        for (var i = 0; i < _history.Count; i++)
-            items.Add(new EditorHistoryListItem(i, _history[i].Label, _history[i].ThumbnailDataUrl));
+        var items = new List<EditorHistoryListItem>(layer.History.Count);
+        for (var i = 0; i < layer.History.Count; i++)
+            items.Add(new EditorHistoryListItem(i, layer.History[i].Label, layer.History[i].ThumbnailDataUrl));
 
         return items;
     }
@@ -1964,48 +1976,69 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         if (!HasImage)
             return;
 
-        if (_historyIndex >= 0 && _historyIndex < _history.Count - 1)
-            _history.RemoveRange(_historyIndex + 1, _history.Count - _historyIndex - 1);
+        var layer = GetActiveLayerInternal();
+        if (layer is null)
+            return;
+
+        // Trim future history entries on the active layer
+        if (layer.HistoryIndex >= 0 && layer.HistoryIndex < layer.History.Count - 1)
+            layer.History.RemoveRange(layer.HistoryIndex + 1, layer.History.Count - layer.HistoryIndex - 1);
 
         var (thumb, size) = await RunImageCpuAsync(
             () => (_imageProcessor.CreateThumbnailDataUrl(bytes), _imageProcessor.GetSize(bytes)),
             inProgressStatus: null);
 
-        var layerSnapshots = CreateLayerSnapshots();
-
-        if (replaceCurrentIfSameLabel && _historyIndex >= 0 && _historyIndex == _history.Count - 1 && _history[_historyIndex].Label == label)
+        if (replaceCurrentIfSameLabel && layer.HistoryIndex >= 0 && layer.HistoryIndex == layer.History.Count - 1 && layer.History[layer.HistoryIndex].Label == label)
         {
-            _history[_historyIndex] = new HistoryEntry(bytes, label, DateTime.UtcNow, thumb, layerSnapshots, _activeLayerIndex);
+            layer.History[layer.HistoryIndex] = new LayerHistoryEntry(bytes.ToArray(), label, DateTime.UtcNow, thumb);
         }
         else
         {
-            _history.Add(new HistoryEntry(bytes, label, DateTime.UtcNow, thumb, layerSnapshots, _activeLayerIndex));
-            _historyIndex = _history.Count - 1;
+            layer.History.Add(new LayerHistoryEntry(bytes.ToArray(), label, DateTime.UtcNow, thumb));
+            layer.HistoryIndex = layer.History.Count - 1;
 
-            if (_history.Count > MaxHistoryEntries)
+            if (layer.History.Count > MaxLayerHistoryEntries)
             {
-                var remove = _history.Count - MaxHistoryEntries;
-                _history.RemoveRange(0, remove);
-                _historyIndex = Math.Max(0, _historyIndex - remove);
+                var remove = layer.History.Count - MaxLayerHistoryEntries;
+                layer.History.RemoveRange(0, remove);
+                layer.HistoryIndex = Math.Max(0, layer.HistoryIndex - remove);
             }
         }
 
-        _viewBytes = bytes;
+        // Update layer bytes
+        layer.Bytes = bytes.ToArray();
+
+        _viewBytes = GetCompositedBytesOrFallback() ?? bytes;
         (_imageWidth, _imageHeight) = size;
 
         if (!preserveHandles)
             _handles = new();
     }
 
-    public Task UndoAsync() => GoToHistoryAsync(_historyIndex - 1);
-    public Task RedoAsync() => GoToHistoryAsync(_historyIndex + 1);
+    public Task UndoAsync()
+    {
+        var idx = GetActiveLayerHistoryIndex();
+        return GoToHistoryAsync(idx - 1);
+    }
+
+    public Task RedoAsync()
+    {
+        var idx = GetActiveLayerHistoryIndex();
+        return GoToHistoryAsync(idx + 1);
+    }
+
     public Task ResetToOriginalAsync() => GoToHistoryAsync(0);
 
     public async Task GoToHistoryAsync(int index)
     {
         if (!HasImage)
             return;
-        if (index < 0 || index >= _history.Count)
+
+        var layer = GetActiveLayerInternal();
+        if (layer is null)
+            return;
+
+        if (index < 0 || index >= layer.History.Count)
             return;
 
         _debounceCts?.Cancel();
@@ -2013,27 +2046,19 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         _debounceCts = null;
 
         _perspectiveMode = false;
-        _historyIndex = index;
+        layer.HistoryIndex = index;
 
-        var entry = _history[index];
+        var entry = layer.History[index];
         var bytes = entry.Bytes;
 
-        // Restore layer state from history snapshot
-        if (entry.Layers is { Count: > 0 })
-        {
-            RestoreLayersFromSnapshots(entry.Layers, entry.ActiveLayerIndex);
-        }
-        else
-        {
-            // Fallback for old history entries without layer info
-            LayersInitFromDocumentBytes(bytes);
-        }
+        // Update layer bytes from history
+        layer.Bytes = bytes.ToArray();
 
         _viewBytes = GetCompositedBytesOrFallback() ?? bytes;
         (_imageWidth, _imageHeight) = await RunImageCpuAsync(() => _imageProcessor.GetSize(bytes), inProgressStatus: "Loading...");
         _handles = new();
 
-        _status = "History restored";
+        _status = $"Layer history restored ({layer.Name})";
         RefreshFooter();
         NotifyAll();
         return;
@@ -2069,10 +2094,46 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
 
         _processingLock.Dispose();
     }
-    //Model �������� �������� ����
-    private sealed record LayerEntry(Guid Id, string Name, byte[] Bytes, bool Visible);
+
+    // Layer with per-layer history
+    private sealed class LayerEntry
+    {
+        public Guid Id { get; }
+        public string Name { get; set; }
+        public byte[] Bytes { get; set; }
+        public bool Visible { get; set; }
+        public List<LayerHistoryEntry> History { get; } = new();
+        public int HistoryIndex { get; set; } = -1;
+
+        public LayerEntry(Guid id, string name, byte[] bytes, bool visible)
+        {
+            Id = id;
+            Name = name;
+            Bytes = bytes;
+            Visible = visible;
+        }
+
+        public LayerEntry Clone()
+        {
+            var copy = new LayerEntry(Id, Name, Bytes.ToArray(), Visible);
+            foreach (var h in History)
+                copy.History.Add(h);
+            copy.HistoryIndex = HistoryIndex;
+            return copy;
+        }
+    }
+
     private readonly List<LayerEntry> _layers = new();
     private int _activeLayerIndex = -1;
+
+    private LayerEntry? GetActiveLayerInternal()
+        => _activeLayerIndex >= 0 && _activeLayerIndex < _layers.Count ? _layers[_activeLayerIndex] : null;
+
+    private int GetActiveLayerHistoryIndex()
+    {
+        var layer = GetActiveLayerInternal();
+        return layer?.HistoryIndex ?? -1;
+    }
 
     public bool HasActiveLayer => HasImage && _activeLayerIndex >= 0 && _activeLayerIndex < _layers.Count;
     public bool CanDeleteLayer => HasImage && _layers.Count > 1 && _activeLayerIndex >= 0;
@@ -2099,40 +2160,6 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     private byte[]? ActiveLayerBytes
         => _activeLayerIndex >= 0 && _activeLayerIndex < _layers.Count ? _layers[_activeLayerIndex].Bytes : null;
 
-    private IReadOnlyList<LayerSnapshot> CreateLayerSnapshots()
-    {
-        if (_layers.Count == 0)
-            return Array.Empty<LayerSnapshot>();
-
-        var snapshots = new LayerSnapshot[_layers.Count];
-        for (var i = 0; i < _layers.Count; i++)
-        {
-            var layer = _layers[i];
-            // Deep copy bytes to preserve history state
-            var bytesCopy = new byte[layer.Bytes.Length];
-            Array.Copy(layer.Bytes, bytesCopy, layer.Bytes.Length);
-            snapshots[i] = new LayerSnapshot(layer.Id, layer.Name, bytesCopy, layer.Visible);
-        }
-        return snapshots;
-    }
-
-    private void RestoreLayersFromSnapshots(IReadOnlyList<LayerSnapshot>? snapshots, int activeIndex)
-    {
-        _layers.Clear();
-        if (snapshots is null || snapshots.Count == 0)
-        {
-            _activeLayerIndex = -1;
-            return;
-        }
-
-        foreach (var snapshot in snapshots)
-        {
-            _layers.Add(new LayerEntry(snapshot.Id, snapshot.Name, snapshot.Bytes, snapshot.Visible));
-        }
-        _activeLayerIndex = Math.Clamp(activeIndex, 0, _layers.Count - 1);
-        UpdateViewFromLayers();
-    }
-
     private void LayersReset()
     {
         _layers.Clear();
@@ -2142,7 +2169,11 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     private void LayersInitFromDocumentBytes(byte[] bytes)
     {
         _layers.Clear();
-        _layers.Add(new LayerEntry(Guid.NewGuid(), "Base", bytes, Visible: true));
+        var layer = new LayerEntry(Guid.NewGuid(), "Base", bytes.ToArray(), true);
+        // Initialize first history entry for the layer
+        layer.History.Add(new LayerHistoryEntry(bytes.ToArray(), "Initial", DateTime.UtcNow, null));
+        layer.HistoryIndex = 0;
+        _layers.Add(layer);
         _activeLayerIndex = 0;
         UpdateViewFromLayers();
     }
@@ -2152,7 +2183,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         if (_activeLayerIndex < 0 || _activeLayerIndex >= _layers.Count)
             return;
 
-        _layers[_activeLayerIndex] = _layers[_activeLayerIndex] with { Bytes = bytes };
+        _layers[_activeLayerIndex].Bytes = bytes;
     }
 
     private byte[]? GetCompositedBytesOrFallback()
@@ -2189,7 +2220,11 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
             return;
 
         var created = _imageProcessor.CreateTransparent(w, h);
-        _layers.Add(new LayerEntry(Guid.NewGuid(), $"Layer {_layers.Count + 1}", created.Bytes, Visible: true));
+        var newLayer = new LayerEntry(Guid.NewGuid(), $"Layer {_layers.Count + 1}", created.Bytes, true);
+        // Initialize first history entry for the new layer
+        newLayer.History.Add(new LayerHistoryEntry(created.Bytes.ToArray(), "Initial", DateTime.UtcNow, null));
+        newLayer.HistoryIndex = 0;
+        _layers.Add(newLayer);
         _activeLayerIndex = _layers.Count - 1;
 
         UpdateViewFromLayers();
@@ -2202,7 +2237,11 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
             return Task.CompletedTask;
 
         var src = _layers[_activeLayerIndex];
-        _layers.Add(new LayerEntry(Guid.NewGuid(), $"{src.Name} Copy", src.Bytes, src.Visible));
+        var newLayer = new LayerEntry(Guid.NewGuid(), $"{src.Name} Copy", src.Bytes.ToArray(), src.Visible);
+        // Initialize first history entry for the duplicated layer
+        newLayer.History.Add(new LayerHistoryEntry(src.Bytes.ToArray(), "Duplicated", DateTime.UtcNow, null));
+        newLayer.HistoryIndex = 0;
+        _layers.Add(newLayer);
         _activeLayerIndex = _layers.Count - 1;
 
         UpdateViewFromLayers();
@@ -2243,7 +2282,11 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         var upper = _layers[_activeLayerIndex];
 
         var merged = _imageProcessor.CompositeRgbaLayers(new[] { lower.Bytes, upper.Bytes });
-        _layers[lowerIndex] = lower with { Bytes = merged };
+        lower.Bytes = merged;
+        // Add merge to lower layer's history
+        lower.History.Add(new LayerHistoryEntry(merged.ToArray(), "Merged", DateTime.UtcNow, null));
+        lower.HistoryIndex = lower.History.Count - 1;
+
         _layers.RemoveAt(_activeLayerIndex);
         _activeLayerIndex = lowerIndex;
 
@@ -2261,7 +2304,7 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
             return Task.CompletedTask;
 
         var layer = _layers[index];
-        _layers[index] = layer with { Visible = !layer.Visible };
+        layer.Visible = !layer.Visible;
 
         // If we just hid the active layer, move to a visible layer (if any).
         _ = EnsureActiveLayerEditable();
