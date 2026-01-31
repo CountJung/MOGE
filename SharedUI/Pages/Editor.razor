@@ -53,7 +53,12 @@
                        ApplySelectionBlur="Vm!.ApplySelectionBlurAsync"
                        ApplySelectionSharpen="Vm!.ApplySelectionSharpenAsync"
                        FillSelection="Vm!.FillSelectionAsync"
-                       CanFillSelection="@Vm!.CanFillSelection" />
+                       CanFillSelection="@Vm!.CanFillSelection"
+                       CanCopySelection="@Vm!.CanCopySelection"
+                       CanPaste="@Vm!.CanPaste"
+                       CopySelection="Vm!.CopySelectionAsync"
+                       CutSelection="Vm!.CutSelectionAsync"
+                       PasteClipboard="Vm!.PasteAsync" />
     </MudItem>
 
     <MudItem xs="12" md="7" lg="8">

@@ -1271,6 +1271,270 @@ public sealed class ImageProcessorService
         return EncodeForDisplay(merged);
     }
 
+    /// <summary>
+    /// Extracts pixels from the image where mask is non-zero.
+    /// Returns RGBA bytes with transparent pixels outside the mask.
+    /// </summary>
+    public (byte[] Rgba, int Width, int Height, int OffsetX, int OffsetY) ExtractByMask(byte[] imageBytes, byte[] mask)
+    {
+        var (iw, ih) = GetSize(imageBytes);
+        if (iw <= 0 || ih <= 0)
+            throw new InvalidOperationException("Image size is unknown.");
+
+        if (mask is null || mask.Length != iw * ih)
+            throw new ArgumentException("Mask size mismatch.", nameof(mask));
+
+        // Find bounding box of the mask
+        var minX = iw;
+        var minY = ih;
+        var maxX = -1;
+        var maxY = -1;
+
+        for (var y = 0; y < ih; y++)
+        {
+            var row = y * iw;
+            for (var x = 0; x < iw; x++)
+            {
+                if (mask[row + x] != 0)
+                {
+                    if (x < minX) minX = x;
+                    if (y < minY) minY = y;
+                    if (x > maxX) maxX = x;
+                    if (y > maxY) maxY = y;
+                }
+            }
+        }
+
+        if (maxX < minX || maxY < minY)
+        {
+            // Empty mask
+            return (Array.Empty<byte>(), 0, 0, 0, 0);
+        }
+
+        var cropW = maxX - minX + 1;
+        var cropH = maxY - minY + 1;
+        var result = new byte[cropW * cropH * 4];
+
+        if (OperatingSystem.IsBrowser())
+        {
+            var raw = GetRawOrThrow(imageBytes);
+            for (var dy = 0; dy < cropH; dy++)
+            {
+                var srcY = minY + dy;
+                for (var dx = 0; dx < cropW; dx++)
+                {
+                    var srcX = minX + dx;
+                    var maskIdx = srcY * iw + srcX;
+                    var dstIdx = (dy * cropW + dx) * 4;
+
+                    if (mask[maskIdx] != 0)
+                    {
+                        var srcIdx = maskIdx * 4;
+                        result[dstIdx + 0] = raw.RgbaBytes[srcIdx + 0];
+                        result[dstIdx + 1] = raw.RgbaBytes[srcIdx + 1];
+                        result[dstIdx + 2] = raw.RgbaBytes[srcIdx + 2];
+                        result[dstIdx + 3] = raw.RgbaBytes[srcIdx + 3];
+                    }
+                    else
+                    {
+                        // Transparent
+                        result[dstIdx + 0] = 0;
+                        result[dstIdx + 1] = 0;
+                        result[dstIdx + 2] = 0;
+                        result[dstIdx + 3] = 0;
+                    }
+                }
+            }
+        }
+        else
+        {
+            using var src = Decode(imageBytes);
+            using var bgra = src.Channels() == 4 ? src : new Mat();
+            if (src.Channels() != 4)
+                Cv2.CvtColor(src, bgra, ColorConversionCodes.BGR2BGRA);
+
+            var srcMat = src.Channels() == 4 ? src : bgra;
+
+            for (var dy = 0; dy < cropH; dy++)
+            {
+                var srcY = minY + dy;
+                for (var dx = 0; dx < cropW; dx++)
+                {
+                    var srcX = minX + dx;
+                    var maskIdx = srcY * iw + srcX;
+                    var dstIdx = (dy * cropW + dx) * 4;
+
+                    if (mask[maskIdx] != 0)
+                    {
+                        var pixel = srcMat.At<Vec4b>(srcY, srcX);
+                        // BGRA -> RGBA
+                        result[dstIdx + 0] = pixel.Item2; // R
+                        result[dstIdx + 1] = pixel.Item1; // G
+                        result[dstIdx + 2] = pixel.Item0; // B
+                        result[dstIdx + 3] = pixel.Item3; // A
+                    }
+                    else
+                    {
+                        result[dstIdx + 0] = 0;
+                        result[dstIdx + 1] = 0;
+                        result[dstIdx + 2] = 0;
+                        result[dstIdx + 3] = 0;
+                    }
+                }
+            }
+        }
+
+        return (result, cropW, cropH, minX, minY);
+    }
+
+    /// <summary>
+    /// Clears (fills with transparent or background color) pixels where mask is non-zero.
+    /// </summary>
+    public byte[] ClearByMask(byte[] imageBytes, byte[] mask, Rgba32 clearColor)
+    {
+        return FillByMask(imageBytes, mask, clearColor);
+    }
+
+    /// <summary>
+    /// Pastes RGBA clipboard data onto the image at the specified position.
+    /// </summary>
+    public byte[] PasteImage(byte[] imageBytes, byte[] clipboardRgba, int clipW, int clipH, int offsetX, int offsetY)
+    {
+        var (iw, ih) = GetSize(imageBytes);
+        if (iw <= 0 || ih <= 0)
+            throw new InvalidOperationException("Image size is unknown.");
+
+        if (clipboardRgba is null || clipboardRgba.Length != clipW * clipH * 4)
+            throw new ArgumentException("Clipboard data size mismatch.");
+
+        if (OperatingSystem.IsBrowser())
+        {
+            var raw = GetRawOrThrow(imageBytes);
+            var dst = raw.RgbaBytes.ToArray();
+
+            for (var cy = 0; cy < clipH; cy++)
+            {
+                var dstY = offsetY + cy;
+                if (dstY < 0 || dstY >= ih)
+                    continue;
+
+                for (var cx = 0; cx < clipW; cx++)
+                {
+                    var dstX = offsetX + cx;
+                    if (dstX < 0 || dstX >= iw)
+                        continue;
+
+                    var clipIdx = (cy * clipW + cx) * 4;
+                    var srcA = clipboardRgba[clipIdx + 3];
+
+                    if (srcA == 0)
+                        continue;
+
+                    var dstIdx = (dstY * iw + dstX) * 4;
+
+                    if (srcA == 255)
+                    {
+                        dst[dstIdx + 0] = clipboardRgba[clipIdx + 0];
+                        dst[dstIdx + 1] = clipboardRgba[clipIdx + 1];
+                        dst[dstIdx + 2] = clipboardRgba[clipIdx + 2];
+                        dst[dstIdx + 3] = 255;
+                    }
+                    else
+                    {
+                        // Alpha blending
+                        var sa = srcA / 255.0;
+                        var da = dst[dstIdx + 3] / 255.0;
+                        var outA = sa + da * (1 - sa);
+
+                        if (outA > 0.0001)
+                        {
+                            double Blend(byte sc, byte dc) => (sc * sa + dc * da * (1 - sa)) / outA;
+                            dst[dstIdx + 0] = (byte)Math.Clamp((int)Math.Round(Blend(clipboardRgba[clipIdx + 0], dst[dstIdx + 0])), 0, 255);
+                            dst[dstIdx + 1] = (byte)Math.Clamp((int)Math.Round(Blend(clipboardRgba[clipIdx + 1], dst[dstIdx + 1])), 0, 255);
+                            dst[dstIdx + 2] = (byte)Math.Clamp((int)Math.Round(Blend(clipboardRgba[clipIdx + 2], dst[dstIdx + 2])), 0, 255);
+                            dst[dstIdx + 3] = (byte)Math.Clamp((int)Math.Round(outA * 255), 0, 255);
+                        }
+                    }
+                }
+            }
+
+            return ReturnToken(new RawRgbaImage(iw, ih, dst));
+        }
+
+        // Native path
+        using var src = Decode(imageBytes);
+        using var split = SplitBgrAndAlpha(src);
+        using var work = split.Bgr.Clone();
+        using var alpha = split.Alpha?.Clone() ?? new Mat(work.Rows, work.Cols, MatType.CV_8UC1, Scalar.All(255));
+
+        // Create clipboard Mat (BGRA)
+        using var clipMat = new Mat(clipH, clipW, MatType.CV_8UC4);
+        for (var cy = 0; cy < clipH; cy++)
+        {
+            for (var cx = 0; cx < clipW; cx++)
+            {
+                var idx = (cy * clipW + cx) * 4;
+                // RGBA -> BGRA
+                clipMat.Set(cy, cx, new Vec4b(
+                    clipboardRgba[idx + 2],
+                    clipboardRgba[idx + 1],
+                    clipboardRgba[idx + 0],
+                    clipboardRgba[idx + 3]
+                ));
+            }
+        }
+
+        // Paste with alpha blending
+        for (var cy = 0; cy < clipH; cy++)
+        {
+            var dstY = offsetY + cy;
+            if (dstY < 0 || dstY >= ih)
+                continue;
+
+            for (var cx = 0; cx < clipW; cx++)
+            {
+                var dstX = offsetX + cx;
+                if (dstX < 0 || dstX >= iw)
+                    continue;
+
+                var clipPixel = clipMat.At<Vec4b>(cy, cx);
+                var srcA = clipPixel.Item3;
+
+                if (srcA == 0)
+                    continue;
+
+                if (srcA == 255)
+                {
+                    work.Set(dstY, dstX, new Vec3b(clipPixel.Item0, clipPixel.Item1, clipPixel.Item2));
+                    alpha.Set(dstY, dstX, (byte)255);
+                }
+                else
+                {
+                    var dstPixel = work.At<Vec3b>(dstY, dstX);
+                    var dstA = alpha.At<byte>(dstY, dstX);
+
+                    var sa = srcA / 255.0;
+                    var da = dstA / 255.0;
+                    var outA = sa + da * (1 - sa);
+
+                    if (outA > 0.0001)
+                    {
+                        double Blend(byte sc, byte dc) => (sc * sa + dc * da * (1 - sa)) / outA;
+                        work.Set(dstY, dstX, new Vec3b(
+                            (byte)Math.Clamp((int)Math.Round(Blend(clipPixel.Item0, dstPixel.Item0)), 0, 255),
+                            (byte)Math.Clamp((int)Math.Round(Blend(clipPixel.Item1, dstPixel.Item1)), 0, 255),
+                            (byte)Math.Clamp((int)Math.Round(Blend(clipPixel.Item2, dstPixel.Item2)), 0, 255)
+                        ));
+                        alpha.Set(dstY, dstX, (byte)Math.Clamp((int)Math.Round(outA * 255), 0, 255));
+                    }
+                }
+            }
+        }
+
+        using var merged = MergeBgrAndAlpha(work, alpha);
+        return EncodeForDisplay(merged);
+    }
+
     public byte[] DrawText(byte[] imageBytes, string text, int x, int y, Rgba32 color, double scale = 1.0, int thickness = 2)
     {
         if (string.IsNullOrWhiteSpace(text))

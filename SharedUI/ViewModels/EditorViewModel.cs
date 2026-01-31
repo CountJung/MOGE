@@ -56,6 +56,14 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     private int _selectionBlurKernelSize;
     private double _selectionSharpenAmount = 1.0;
 
+    // Clipboard for copy/cut/paste
+    private byte[]? _clipboardImageBytes;
+    private byte[]? _clipboardMask;
+    private int _clipboardWidth;
+    private int _clipboardHeight;
+    private int _clipboardOffsetX;
+    private int _clipboardOffsetY;
+
     private int _blurKernelSize;
     private bool _grayscale;
     private bool _sepia;
@@ -152,6 +160,9 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     public IReadOnlyList<CanvasPoint> SelectionPreviewPolygonPoints => _selectionPreviewPolygonPoints;
 
     public bool CanFillSelection => HasImage && (_selectionMode || _selectionMask is { Length: > 0 });
+
+    public bool CanCopySelection => HasImage && (_selectionMode || _selectionMask is { Length: > 0 });
+    public bool CanPaste => HasImage && _clipboardImageBytes is { Length: > 0 };
 
     public IReadOnlyList<CanvasPoint> Handles => _handles;
 
@@ -1236,6 +1247,183 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         RefreshFooter();
         NotifyAll();
         await ApplyPipelineDebouncedAsync();
+    }
+
+    public async Task CopySelectionAsync()
+    {
+        if (!HasImage)
+            return;
+
+        var mask = GetCurrentSelectionMask();
+        if (mask is null)
+        {
+            _status = "No selection to copy";
+            RefreshFooter();
+            NotifyAll();
+            return;
+        }
+
+        _status = "Copying selection...";
+        RefreshFooter();
+        NotifyAll();
+
+        var baseBytes = GetActiveLayerOrCurrentBytesOrThrow();
+        try
+        {
+            var (rgba, w, h, ox, oy) = await RunImageCpuAsync(
+                () => _imageProcessor.ExtractByMask(baseBytes, mask),
+                inProgressStatus: "Copying selection...");
+
+            if (rgba.Length == 0)
+            {
+                _status = "Selection is empty";
+                RefreshFooter();
+                NotifyAll();
+                return;
+            }
+
+            _clipboardImageBytes = rgba;
+            _clipboardMask = mask;
+            _clipboardWidth = w;
+            _clipboardHeight = h;
+            _clipboardOffsetX = ox;
+            _clipboardOffsetY = oy;
+
+            _status = $"Copied {w}x{h} pixels";
+        }
+        catch (Exception ex)
+        {
+            _status = ex.Message;
+        }
+
+        RefreshFooter();
+        NotifyAll();
+    }
+
+    public async Task CutSelectionAsync()
+    {
+        if (!HasImage)
+            return;
+
+        var mask = GetCurrentSelectionMask();
+        if (mask is null)
+        {
+            _status = "No selection to cut";
+            RefreshFooter();
+            NotifyAll();
+            return;
+        }
+
+        _status = "Cutting selection...";
+        RefreshFooter();
+        NotifyAll();
+
+        var baseBytes = GetActiveLayerOrCurrentBytesOrThrow();
+        try
+        {
+            // First copy
+            var (rgba, w, h, ox, oy) = await RunImageCpuAsync(
+                () => _imageProcessor.ExtractByMask(baseBytes, mask),
+                inProgressStatus: "Extracting selection...");
+
+            if (rgba.Length == 0)
+            {
+                _status = "Selection is empty";
+                RefreshFooter();
+                NotifyAll();
+                return;
+            }
+
+            _clipboardImageBytes = rgba;
+            _clipboardMask = mask;
+            _clipboardWidth = w;
+            _clipboardHeight = h;
+            _clipboardOffsetX = ox;
+            _clipboardOffsetY = oy;
+
+            // Then clear the selection area with background color (transparent if alpha=0)
+            var clearColor = WithAlpha(Rgba32.FromHexOrDefault(_backgroundColorHex, new Rgba32(255, 255, 255, 255)), _backgroundAlpha);
+            var next = await RunImageCpuAsync(
+                () => _imageProcessor.ClearByMask(baseBytes, mask, clearColor),
+                inProgressStatus: "Clearing selection...");
+
+            ApplyToActiveLayerAndRefresh(next);
+            await CommitHistoryAsync(_viewBytes ?? next, "Cut", preserveHandles: true);
+
+            _status = $"Cut {w}x{h} pixels";
+        }
+        catch (Exception ex)
+        {
+            _status = ex.Message;
+        }
+
+        RefreshFooter();
+        NotifyAll();
+        await ApplyPipelineDebouncedAsync();
+    }
+
+    public async Task PasteAsync()
+    {
+        if (!HasImage)
+            return;
+
+        if (_clipboardImageBytes is null || _clipboardImageBytes.Length == 0)
+        {
+            _status = "Clipboard is empty";
+            RefreshFooter();
+            NotifyAll();
+            return;
+        }
+
+        _status = "Pasting...";
+        RefreshFooter();
+        NotifyAll();
+
+        var baseBytes = GetActiveLayerOrCurrentBytesOrThrow();
+        try
+        {
+            var next = await RunImageCpuAsync(
+                () => _imageProcessor.PasteImage(baseBytes, _clipboardImageBytes, _clipboardWidth, _clipboardHeight, _clipboardOffsetX, _clipboardOffsetY),
+                inProgressStatus: "Pasting...");
+
+            ApplyToActiveLayerAndRefresh(next);
+            await CommitHistoryAsync(_viewBytes ?? next, "Paste", preserveHandles: true);
+
+            _status = $"Pasted {_clipboardWidth}x{_clipboardHeight} pixels";
+        }
+        catch (Exception ex)
+        {
+            _status = ex.Message;
+        }
+
+        RefreshFooter();
+        NotifyAll();
+        await ApplyPipelineDebouncedAsync();
+    }
+
+    /// <summary>
+    /// Gets the current selection mask, either from selection mode rectangle or from magic wand/lasso.
+    /// </summary>
+    private byte[]? GetCurrentSelectionMask()
+    {
+        if (_selectionMode && _handles.Count == 4)
+        {
+            // Create mask from rectangle selection
+            var (x0, y0, w, h) = GetHandlesRect();
+            var mask = new byte[_imageWidth * _imageHeight];
+            for (var yy = y0; yy < y0 + h && yy < _imageHeight; yy++)
+            {
+                var row = yy * _imageWidth;
+                for (var xx = x0; xx < x0 + w && xx < _imageWidth; xx++)
+                    mask[row + xx] = 255;
+            }
+            return mask;
+        }
+
+        if (_selectionMask is { Length: > 0 })
+            return _selectionMask;
+
+        return null;
     }
 
     public async Task ApplyTextAsync()

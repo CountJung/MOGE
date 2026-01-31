@@ -44,6 +44,13 @@ public partial class EditorToolBar
 
     [Parameter] public bool CanFillSelection { get; set; }
 
+    [Parameter] public bool CanCopySelection { get; set; }
+    [Parameter] public bool CanPaste { get; set; }
+
+    [Parameter] public EventCallback CopySelection { get; set; }
+    [Parameter] public EventCallback CutSelection { get; set; }
+    [Parameter] public EventCallback PasteClipboard { get; set; }
+
     [Parameter] public int MagicWandTolerance { get; set; }
     [Parameter] public EventCallback<int> MagicWandToleranceChanged { get; set; }
 

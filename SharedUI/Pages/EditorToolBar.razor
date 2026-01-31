@@ -64,6 +64,21 @@
                     <MudIconButton Icon="@Icons.Material.Filled.TextFields" Color="@(IsTextTool ? Color.Primary : Color.Inherit)" Disabled="@ToolDisabled"
                                    OnClick="SelectTextTool" aria-label="Tool: Text" />
                 </MudTooltip>
+                <MudTooltip Text="Copy selection">
+                    <MudIconButton Icon="@Icons.Material.Filled.ContentCopy" Disabled="@(!CanCopySelection)"
+                                   OnClick="@(async () => await CopySelection.InvokeAsync())" aria-label="Copy selection" />
+                </MudTooltip>
+                <MudTooltip Text="Cut selection">
+                    <MudIconButton Icon="@Icons.Material.Filled.ContentCut" Disabled="@(!CanCopySelection)"
+                                   OnClick="@(async () => await CutSelection.InvokeAsync())" aria-label="Cut selection" />
+                </MudTooltip>
+                <MudTooltip Text="Paste">
+                    <MudIconButton Icon="@Icons.Material.Filled.ContentPaste" Disabled="@(!CanPaste)"
+                                   OnClick="@(async () => await PasteClipboard.InvokeAsync())" aria-label="Paste" />
+                </MudTooltip>
+            </MudStack>
+
+            <MudStack Row="true" Spacing="1" AlignItems="AlignItems.Center" Style="flex-wrap:wrap;">
                 <MudTooltip Text="Apply blur to selection">
                     <MudIconButton Icon="@Icons.Material.Filled.BlurOn" Disabled="@(!HasImage || !SelectionMode)"
                                    OnClick="@(async () => await ApplySelectionBlur.InvokeAsync())" aria-label="Apply blur to selection" />
