@@ -2158,7 +2158,20 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
     }
 
     private byte[]? ActiveLayerBytes
-        => _activeLayerIndex >= 0 && _activeLayerIndex < _layers.Count ? _layers[_activeLayerIndex].Bytes : null;
+    {
+        get
+        {
+            if (_activeLayerIndex < 0 || _activeLayerIndex >= _layers.Count)
+                return null;
+
+            var layer = _layers[_activeLayerIndex];
+            // Return bytes from current history state
+            if (layer.History.Count > 0 && layer.HistoryIndex >= 0 && layer.HistoryIndex < layer.History.Count)
+                return layer.History[layer.HistoryIndex].Bytes;
+
+            return layer.Bytes;
+        }
+    }
 
     private void LayersReset()
     {
@@ -2186,23 +2199,47 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         _layers[_activeLayerIndex].Bytes = bytes;
     }
 
+    /// <summary>
+    /// Gets the bytes for a layer based on its current history state.
+    /// If history exists, returns bytes from current history index; otherwise returns layer's current bytes.
+    /// </summary>
+    private byte[] GetLayerBytesFromHistory(LayerEntry layer)
+    {
+        if (layer.History.Count > 0 && layer.HistoryIndex >= 0 && layer.HistoryIndex < layer.History.Count)
+        {
+            return layer.History[layer.HistoryIndex].Bytes;
+        }
+        // Fallback to layer's current bytes if no history
+        return layer.Bytes;
+    }
+
     private byte[]? GetCompositedBytesOrFallback()
     {
         if (_layers.Count == 0)
             return CurrentBytes;
 
         if (_layers.Count == 1)
-            return _layers[0].Visible ? _layers[0].Bytes : CurrentBytes;
+        {
+            if (!_layers[0].Visible)
+                return CurrentBytes;
+            return GetLayerBytesFromHistory(_layers[0]);
+        }
 
-        var visible = _layers.Where(l => l.Visible).Select(l => l.Bytes).ToArray();
-        if (visible.Length == 0)
+        var visibleBytes = _layers
+            .Where(l => l.Visible)
+            .Select(GetLayerBytesFromHistory)
+            .ToArray();
+
+        if (visibleBytes.Length == 0)
             return CurrentBytes;
 
-        return _imageProcessor.CompositeRgbaLayers(visible);
+        return _imageProcessor.CompositeRgbaLayers(visibleBytes);
     }
 
     private void UpdateViewFromLayers()
     {
+        // Show all visible layers composited together.
+        // Users can control which layers are visible via the visibility toggle in the UI.
         _viewBytes = GetCompositedBytesOrFallback() ?? _viewBytes;
     }
 
@@ -2368,6 +2405,41 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
             return;
 
         SetActiveLayerBytes(next);
-        UpdateViewFromLayers();
+
+        // Immediately update viewBytes with the new result before history is committed.
+        // This ensures the canvas shows the latest edit right away.
+        // Composite all visible layers including the just-edited one.
+        _viewBytes = GetCompositedBytesWithOverride(_activeLayerIndex, next) ?? next;
+    }
+
+    /// <summary>
+    /// Computes composited bytes of visible layers, using an override for a specific layer index.
+    /// Used to show immediate edits before they are committed to history.
+    /// </summary>
+    private byte[]? GetCompositedBytesWithOverride(int overrideIndex, byte[] overrideBytes)
+    {
+        if (_layers.Count == 0)
+            return CurrentBytes;
+
+        if (_layers.Count == 1)
+        {
+            if (!_layers[0].Visible)
+                return CurrentBytes;
+            return overrideIndex == 0 ? overrideBytes : GetLayerBytesFromHistory(_layers[0]);
+        }
+
+        var visibleBytes = new List<byte[]>();
+        for (var i = 0; i < _layers.Count; i++)
+        {
+            if (!_layers[i].Visible)
+                continue;
+
+            visibleBytes.Add(i == overrideIndex ? overrideBytes : GetLayerBytesFromHistory(_layers[i]));
+        }
+
+        if (visibleBytes.Count == 0)
+            return CurrentBytes;
+
+        return _imageProcessor.CompositeRgbaLayers(visibleBytes.ToArray());
     }
 }
