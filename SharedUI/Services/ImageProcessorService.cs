@@ -2035,4 +2035,111 @@ public sealed class ImageProcessorService
             }
         }
     }
+
+    /// <summary>
+    /// Creates a selection mask from polygon contour points (lasso selection).
+    /// Returns a byte[] mask where 255 = inside the polygon, 0 = outside.
+    /// </summary>
+    public byte[] CreatePolygonMask(byte[] imageBytes, IReadOnlyList<(int X, int Y)> polygonPoints)
+    {
+        var (iw, ih) = GetSize(imageBytes);
+        if (iw <= 0 || ih <= 0)
+            throw new InvalidOperationException("Image size is unknown.");
+
+        if (polygonPoints is null || polygonPoints.Count < 3)
+            return new byte[iw * ih]; // Empty mask for insufficient points
+
+        var mask = new byte[iw * ih];
+
+        if (OperatingSystem.IsBrowser())
+        {
+            // Browser path: software rasterization of polygon
+            FillPolygonSoftware(mask, iw, ih, polygonPoints);
+            return mask;
+        }
+
+        // Native path: use OpenCV to fill the polygon
+        using var maskMat = new Mat(ih, iw, MatType.CV_8UC1, Scalar.All(0));
+        var pts = polygonPoints.Select(p => new OpenCvSharp.Point(
+            Math.Clamp(p.X, 0, iw - 1),
+            Math.Clamp(p.Y, 0, ih - 1)
+        )).ToArray();
+
+        Cv2.FillPoly(maskMat, new[] { pts }, new Scalar(255));
+
+        if (maskMat.IsContinuous())
+        {
+            Marshal.Copy(maskMat.Data, mask, 0, mask.Length);
+        }
+        else
+        {
+            for (var y = 0; y < ih; y++)
+            {
+                var srcRow = maskMat.Ptr(y);
+                Marshal.Copy(srcRow, mask, y * iw, iw);
+            }
+        }
+
+        return mask;
+    }
+
+    /// <summary>
+    /// Software polygon fill using scanline algorithm (for browser WASM).
+    /// </summary>
+    private static void FillPolygonSoftware(byte[] mask, int width, int height, IReadOnlyList<(int X, int Y)> pts)
+    {
+        var n = pts.Count;
+        if (n < 3)
+            return;
+
+        // Find bounding box
+        var minY = int.MaxValue;
+        var maxY = int.MinValue;
+        foreach (var p in pts)
+        {
+            if (p.Y < minY) minY = p.Y;
+            if (p.Y > maxY) maxY = p.Y;
+        }
+
+        minY = Math.Max(0, minY);
+        maxY = Math.Min(height - 1, maxY);
+
+        // Scanline fill
+        var nodeX = new List<int>(n);
+
+        for (var y = minY; y <= maxY; y++)
+        {
+            nodeX.Clear();
+
+            var j = n - 1;
+            for (var i = 0; i < n; i++)
+            {
+                var yi = pts[i].Y;
+                var yj = pts[j].Y;
+                var xi = pts[i].X;
+                var xj = pts[j].X;
+
+                if ((yi < y && yj >= y) || (yj < y && yi >= y))
+                {
+                    var xIntersect = xi + (y - yi) * (xj - xi) / (double)(yj - yi);
+                    nodeX.Add((int)Math.Round(xIntersect));
+                }
+
+                j = i;
+            }
+
+            nodeX.Sort();
+
+            for (var i = 0; i + 1 < nodeX.Count; i += 2)
+            {
+                var x0 = Math.Max(0, nodeX[i]);
+                var x1 = Math.Min(width - 1, nodeX[i + 1]);
+
+                for (var x = x0; x <= x1; x++)
+                {
+                    mask[y * width + x] = 255;
+                }
+            }
+        }
+    }
 }

@@ -37,6 +37,10 @@
                     <MudIconButton Icon="@Icons.Material.Filled.SelectAll" Color="@(IsSelection ? Color.Primary : Color.Inherit)"
                                    Disabled="@ToolDisabled" OnClick="SelectSelection" aria-label="Tool: Selection" />
                 </MudTooltip>
+                <MudTooltip Text="Free selection (lasso)">
+                    <MudIconButton Icon="@Icons.Material.Filled.Gesture" Color="@(IsLasso ? Color.Primary : Color.Inherit)"
+                                   Disabled="@ToolDisabled" OnClick="SelectLasso" aria-label="Tool: Lasso" />
+                </MudTooltip>
                 <MudTooltip Text="Brush">
                     <MudIconButton Icon="@Icons.Material.Filled.Brush" Color="@(IsBrush ? Color.Primary : Color.Inherit)"
                                    Disabled="@ToolDisabled" OnClick="SelectBrush" aria-label="Tool: Brush" />
@@ -96,6 +100,13 @@
             <MudDivider />
             <MudText Typo="Typo.subtitle2">Text</MudText>
             <MudText Typo="Typo.caption">Click on the canvas to place the text.</MudText>
+        }
+
+        @if (IsLasso)
+        {
+            <MudDivider />
+            <MudText Typo="Typo.subtitle2">Free Selection (Lasso)</MudText>
+            <MudText Typo="Typo.caption">Draw a closed contour to create a selection.</MudText>
         }
 
         @if (PerspectiveMode)

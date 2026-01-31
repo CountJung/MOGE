@@ -969,6 +969,62 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
         await ApplyPipelineDebouncedAsync();
     }
 
+    private async Task ApplyLassoSelectionAsync(IReadOnlyList<CanvasPoint> points)
+    {
+        if (!HasImage)
+            return;
+
+        if (points is null || points.Count < 3)
+        {
+            _status = "Need at least 3 points for lasso selection";
+            RefreshFooter();
+            NotifyAll();
+            return;
+        }
+
+        _status = "Creating lasso selection...";
+        RefreshFooter();
+        NotifyAll();
+
+        var baseBytes = CurrentBytes;
+        if (baseBytes is null)
+        {
+            _status = "No image loaded";
+            RefreshFooter();
+            NotifyAll();
+            return;
+        }
+
+        try
+        {
+            // Convert canvas points to integer coordinates
+            var intPoints = points.Select(p => (
+                X: Math.Clamp((int)Math.Round(p.X), 0, Math.Max(0, _imageWidth - 1)),
+                Y: Math.Clamp((int)Math.Round(p.Y), 0, Math.Max(0, _imageHeight - 1))
+            )).ToList();
+
+            // Create mask from polygon
+            var mask = await RunImageCpuAsync(
+                () => _imageProcessor.CreatePolygonMask(baseBytes, intPoints),
+                inProgressStatus: "Creating selection mask...");
+
+            _selectionMask = mask;
+            _selectionPreviewHandles = ComputeMaskBoundingRectHandles(mask, _imageWidth, _imageHeight);
+            _selectionPreviewPolygonPoints = points.ToList();
+            _status = "Lasso selection created";
+        }
+        catch (Exception ex)
+        {
+            _status = ex.Message;
+            _selectionMask = null;
+            _selectionPreviewHandles = new();
+            _selectionPreviewPolygonPoints = new();
+        }
+
+        RefreshFooter();
+        NotifyAll();
+    }
+
     public Task OnBrushRadiusChanged(int radius)
     {
         _brushRadius = Math.Clamp(radius, 1, 64);
@@ -1625,6 +1681,13 @@ public sealed partial class EditorViewModel : ObservableObject, IDisposable
 
         if (stroke.Points is null || stroke.Points.Count < 1)
             return;
+
+        // Handle Lasso selection mode separately
+        if (stroke.Mode == CanvasInteractionMode.LassoSelection)
+        {
+            await ApplyLassoSelectionAsync(stroke.Points);
+            return;
+        }
 
         _status = "Drawing...";
         RefreshFooter();

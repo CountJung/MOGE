@@ -6,7 +6,8 @@ public enum CanvasInteractionMode
     Brush,
     Eraser,
     MagicWand,
-    Text
+    Text,
+    LassoSelection
 }
 
 public sealed record CanvasStroke(CanvasInteractionMode Mode, IReadOnlyList<CanvasPoint> Points);

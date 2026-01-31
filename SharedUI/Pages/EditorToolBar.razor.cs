@@ -55,6 +55,7 @@ public partial class EditorToolBar
     private bool IsEraser => !SelectionMode && InteractionMode == CanvasInteractionMode.Eraser;
     private bool IsMagicWand => !SelectionMode && InteractionMode == CanvasInteractionMode.MagicWand;
     private bool IsTextTool => !SelectionMode && InteractionMode == CanvasInteractionMode.Text;
+    private bool IsLasso => !SelectionMode && InteractionMode == CanvasInteractionMode.LassoSelection;
 
     private async Task SelectPanZoom()
     {
@@ -117,6 +118,17 @@ public partial class EditorToolBar
             return;
 
         await SelectionModeChanged.InvokeAsync(true);
+    }
+
+    private async Task SelectLasso()
+    {
+        if (ToolDisabled)
+            return;
+
+        if (SelectionMode)
+            await SelectionModeChanged.InvokeAsync(false);
+
+        await InteractionModeChanged.InvokeAsync(CanvasInteractionMode.LassoSelection);
     }
 
     private Task OnForegroundColorInput(ChangeEventArgs e)
