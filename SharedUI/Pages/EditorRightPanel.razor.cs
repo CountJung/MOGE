@@ -6,6 +6,8 @@ namespace SharedUI.Pages;
 
 public partial class EditorRightPanel
 {
+    private readonly EditorRightPanelViewModel _vm = new();
+
     [Parameter] public bool HasImage { get; set; }
 
     [Parameter] public bool PerspectiveMode { get; set; }
@@ -112,54 +114,28 @@ public partial class EditorRightPanel
     [Parameter] public bool CanToggleLayerVisibility { get; set; }
     [Parameter] public EventCallback<int> ToggleLayerVisibility { get; set; }
 
-    private static string ToggleIconStyle(bool isActive)
-    {
-        var borderColor = isActive ? "var(--mud-palette-primary)" : "var(--mud-palette-lines-default)";
-        return $"border:1px solid {borderColor}; border-radius: var(--mud-default-borderradius);";
-    }
+    private string ToggleIconStyle(bool isActive) => _vm.ToggleIconStyle(isActive);
 
-    private static string ActionIconStyle(bool isEnabled)
-    {
-        var borderColor = isEnabled ? "var(--mud-palette-primary)" : "var(--mud-palette-lines-default)";
-        return $"border:1px solid {borderColor}; border-radius: var(--mud-default-borderradius);";
-    }
+    private string ActionIconStyle(bool isEnabled) => _vm.ActionIconStyle(isEnabled);
 
-    private static string HistoryItemStyle(bool isCurrent)
-    {
-        if (!isCurrent)
-            return "border-left:3px solid transparent;";
-
-        return "border-left:3px solid var(--mud-palette-primary);";
-    }
+    private string HistoryItemStyle(bool isCurrent) => _vm.HistoryItemStyle(isCurrent);
 
     private Task OnHistoryItemClicked(int index)
-    {
-        if (!HasImage)
-            return Task.CompletedTask;
-
-        if (index == CurrentHistoryIndex)
-            return Task.CompletedTask;
-
-        return HistoryItemSelected.InvokeAsync(index);
-    }
+        => _vm.CanSelectHistoryItem(HasImage, index, CurrentHistoryIndex)
+            ? HistoryItemSelected.InvokeAsync(index)
+            : Task.CompletedTask;
 
     private Task TogglePerspectiveMode() => PerspectiveModeChanged.InvokeAsync(!PerspectiveMode);
 
     private Task ToggleCropMode()
-    {
-        if (PerspectiveMode)
-            return Task.CompletedTask;
-
-        return CropModeChanged.InvokeAsync(!CropMode);
-    }
+        => _vm.CanToggleCropMode(PerspectiveMode)
+            ? CropModeChanged.InvokeAsync(!CropMode)
+            : Task.CompletedTask;
 
     private Task ToggleGrayscale()
-    {
-        if (Sepia)
-            return Task.CompletedTask;
-
-        return GrayscaleChanged.InvokeAsync(!Grayscale);
-    }
+        => _vm.CanToggleGrayscale(Sepia)
+            ? GrayscaleChanged.InvokeAsync(!Grayscale)
+            : Task.CompletedTask;
 
     private Task ToggleSepia() => SepiaChanged.InvokeAsync(!Sepia);
 
@@ -174,22 +150,9 @@ public partial class EditorRightPanel
     private Task ToggleCanny() => CannyChanged.InvokeAsync(!Canny);
 
     private Task SelectLayerAsync(int index)
-    {
-        if (!HasImage)
-            return Task.CompletedTask;
+        => _vm.CanSelectLayer(HasImage, index, ActiveLayerIndex)
+            ? LayerSelected.InvokeAsync(index)
+            : Task.CompletedTask;
 
-        if (index == ActiveLayerIndex)
-            return Task.CompletedTask;
-
-        return LayerSelected.InvokeAsync(index);
-    }
-
-    private static string LayerItemStyle(bool isActive)
-    {
-        var border = isActive
-            ? "2px solid var(--mud-palette-primary)"
-            : "1px solid var(--mud-palette-lines-default)";
-
-        return $"border:{border}; border-radius: var(--mud-default-borderradius); cursor:pointer; user-select:none;";
-    }
+    private string LayerItemStyle(bool isActive) => _vm.LayerItemStyle(isActive);
 }

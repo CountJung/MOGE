@@ -1,11 +1,14 @@
 using Microsoft.AspNetCore.Components;
-using SharedUI.Components;
 using Microsoft.AspNetCore.Components.Web;
+using SharedUI.Components;
+using SharedUI.ViewModels;
 
 namespace SharedUI.Pages;
 
 public partial class EditorToolBar
 {
+    private readonly EditorToolBarViewModel _vm = new();
+
     [Parameter] public bool HasImage { get; set; }
     [Parameter] public bool PerspectiveMode { get; set; }
     [Parameter] public bool CropMode { get; set; }
@@ -54,17 +57,24 @@ public partial class EditorToolBar
     [Parameter] public int MagicWandTolerance { get; set; }
     [Parameter] public EventCallback<int> MagicWandToleranceChanged { get; set; }
 
-    private bool ToolDisabled => !HasImage || PerspectiveMode || CropMode;
+    private bool ToolDisabled => _vm.ToolDisabled(HasImage, PerspectiveMode, CropMode);
 
-    private bool IsSelection => SelectionMode;
-    private bool IsPanZoom => !SelectionMode && InteractionMode == CanvasInteractionMode.PanZoom;
-    private bool IsBrush => !SelectionMode && InteractionMode == CanvasInteractionMode.Brush;
-    private bool IsEraser => !SelectionMode && InteractionMode == CanvasInteractionMode.Eraser;
-    private bool IsMagicWand => !SelectionMode && InteractionMode == CanvasInteractionMode.MagicWand;
-    private bool IsTextTool => !SelectionMode && InteractionMode == CanvasInteractionMode.Text;
-    private bool IsLasso => !SelectionMode && InteractionMode == CanvasInteractionMode.LassoSelection;
+    private bool IsSelection => _vm.IsSelection(SelectionMode);
+    private bool IsPanZoom => _vm.IsPanZoom(SelectionMode, InteractionMode);
+    private bool IsBrush => _vm.IsBrush(SelectionMode, InteractionMode);
+    private bool IsEraser => _vm.IsEraser(SelectionMode, InteractionMode);
+    private bool IsMagicWand => _vm.IsMagicWand(SelectionMode, InteractionMode);
+    private bool IsTextTool => _vm.IsTextTool(SelectionMode, InteractionMode);
+    private bool IsLasso => _vm.IsLasso(SelectionMode, InteractionMode);
 
-    private async Task SelectPanZoom()
+    private Task SelectPanZoom() => SelectModeAsync(CanvasInteractionMode.PanZoom);
+    private Task SelectBrush() => SelectModeAsync(CanvasInteractionMode.Brush);
+    private Task SelectMagicWand() => SelectModeAsync(CanvasInteractionMode.MagicWand);
+    private Task SelectTextTool() => SelectModeAsync(CanvasInteractionMode.Text);
+    private Task SelectEraser() => SelectModeAsync(CanvasInteractionMode.Eraser);
+    private Task SelectLasso() => SelectModeAsync(CanvasInteractionMode.LassoSelection);
+
+    private async Task SelectModeAsync(CanvasInteractionMode mode)
     {
         if (ToolDisabled)
             return;
@@ -72,98 +82,38 @@ public partial class EditorToolBar
         if (SelectionMode)
             await SelectionModeChanged.InvokeAsync(false);
 
-        await InteractionModeChanged.InvokeAsync(CanvasInteractionMode.PanZoom);
+        await InteractionModeChanged.InvokeAsync(mode);
     }
 
-    private async Task SelectBrush()
-    {
-        if (ToolDisabled)
-            return;
-
-        if (SelectionMode)
-            await SelectionModeChanged.InvokeAsync(false);
-
-        await InteractionModeChanged.InvokeAsync(CanvasInteractionMode.Brush);
-    }
-
-    private async Task SelectMagicWand()
-    {
-        if (ToolDisabled)
-            return;
-
-        if (SelectionMode)
-            await SelectionModeChanged.InvokeAsync(false);
-
-        await InteractionModeChanged.InvokeAsync(CanvasInteractionMode.MagicWand);
-    }
-
-    private async Task SelectTextTool()
-    {
-        if (ToolDisabled)
-            return;
-
-        if (SelectionMode)
-            await SelectionModeChanged.InvokeAsync(false);
-
-        await InteractionModeChanged.InvokeAsync(CanvasInteractionMode.Text);
-    }
-
-    private async Task SelectEraser()
-    {
-        if (ToolDisabled)
-            return;
-
-        if (SelectionMode)
-            await SelectionModeChanged.InvokeAsync(false);
-
-        await InteractionModeChanged.InvokeAsync(CanvasInteractionMode.Eraser);
-    }
-
-    private async Task SelectSelection()
-    {
-        if (ToolDisabled)
-            return;
-
-        await SelectionModeChanged.InvokeAsync(true);
-    }
-
-    private async Task SelectLasso()
-    {
-        if (ToolDisabled)
-            return;
-
-        if (SelectionMode)
-            await SelectionModeChanged.InvokeAsync(false);
-
-        await InteractionModeChanged.InvokeAsync(CanvasInteractionMode.LassoSelection);
-    }
+    private Task SelectSelection()
+        => _vm.CanEnableSelection(ToolDisabled)
+            ? SelectionModeChanged.InvokeAsync(true)
+            : Task.CompletedTask;
 
     private Task OnForegroundColorInput(ChangeEventArgs e)
     {
-        var v = e.Value?.ToString();
-        if (string.IsNullOrWhiteSpace(v))
-            return Task.CompletedTask;
-
-        return ForegroundColorHexChanged.InvokeAsync(v);
+        var value = _vm.ReadColorHex(e);
+        return value is null
+            ? Task.CompletedTask
+            : ForegroundColorHexChanged.InvokeAsync(value);
     }
 
-    private Task OnForegroundAlphaChanged(int a)
-        => ForegroundAlphaChanged.InvokeAsync(Math.Clamp(a, 0, 255));
+    private Task OnForegroundAlphaChanged(int alpha)
+        => ForegroundAlphaChanged.InvokeAsync(_vm.ClampAlpha(alpha));
 
     private Task SetForegroundTransparent()
         => ForegroundAlphaChanged.InvokeAsync(0);
 
     private Task OnBackgroundColorInput(ChangeEventArgs e)
     {
-        var v = e.Value?.ToString();
-        if (string.IsNullOrWhiteSpace(v))
-            return Task.CompletedTask;
-
-        return BackgroundColorHexChanged.InvokeAsync(v);
+        var value = _vm.ReadColorHex(e);
+        return value is null
+            ? Task.CompletedTask
+            : BackgroundColorHexChanged.InvokeAsync(value);
     }
 
-    private Task OnBackgroundAlphaChanged(int a)
-        => BackgroundAlphaChanged.InvokeAsync(Math.Clamp(a, 0, 255));
+    private Task OnBackgroundAlphaChanged(int alpha)
+        => BackgroundAlphaChanged.InvokeAsync(_vm.ClampAlpha(alpha));
 
     private Task SetBackgroundTransparent()
         => BackgroundAlphaChanged.InvokeAsync(0);
