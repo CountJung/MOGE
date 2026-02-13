@@ -107,6 +107,6 @@
 2.  **플랫폼 호환성:** 코드를 작성할 때 이것이 Web(WASM)과 Native(MAUI) 양쪽에서 돌아가는지 항상 체크하라. (특히 파일 입출력 부분에서 추상화 인터페이스 사용 필수)
 3.  **OpenCV 메모리 관리:** `Mat` 객체는 `IDisposable`이므로 `using` 문을 사용하여 메모리 누수를 방지하라.
 4.  **반응형 대응:** `MudGrid` 시스템을 적극 활용하여 모바일 뷰와 데스크톱 뷰를 동시에 만족시켜라.
-5.  **MVVM 사용:** Blazor UI는 MVVM 패턴을 기본으로 사용하라. `.razor`에는 마크업만 두고, 상태/로직은 `.razor.cs` + ViewModel(예: `SharedUI/ViewModels/*`)로 분리하라.
+5.  **바인딩 우선 원칙:** Blazor UI는 `@bind`, `EventCallback`, 단방향/양방향 바인딩을 우선 적용하라. UI 상태와 도메인 로직은 재사용 가능한 ViewModel 또는 서비스로 분리하되, 화면 단순성/가독성을 해치지 않는 범위에서 실용적으로 구성하라.
 
 ## 7. License - MIT
