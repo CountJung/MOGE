@@ -1,0 +1,763 @@
+using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Web;
+using Microsoft.JSInterop;
+using SharedUI.Services.Raw;
+using SharedUI.Services.Settings;
+
+namespace SharedUI.Components;
+
+public partial class ImageCanvas : IDisposable
+{
+    [Inject] private IJSRuntime Js { get; set; } = default!;
+    [Inject] private IServiceProvider Services { get; set; } = default!;
+    [Inject] private AppSettingsService Settings { get; set; } = default!;
+
+    [Parameter] public byte[]? ImageBytes { get; set; }
+    [Parameter] public string? ContentType { get; set; }
+
+    [Parameter] public CanvasInteractionMode InteractionMode { get; set; } = CanvasInteractionMode.PanZoom;
+    [Parameter] public int BrushRadius { get; set; } = 8;
+    [Parameter] public EventCallback<CanvasStroke> StrokeCommitted { get; set; }
+
+    [Parameter] public bool EnableHandles { get; set; }
+    [Parameter] public bool HandlesAsRectangle { get; set; }
+    [Parameter] public IReadOnlyList<CanvasPoint>? Handles { get; set; }
+    [Parameter] public EventCallback<IReadOnlyList<CanvasPoint>> HandlesChanged { get; set; }
+
+    [Parameter] public bool ShowOverlayRectangle { get; set; }
+    [Parameter] public bool OverlayDashed { get; set; }
+    [Parameter] public IReadOnlyList<CanvasPoint>? OverlayHandles { get; set; }
+
+    [Parameter] public bool ShowOverlayPolygon { get; set; }
+    [Parameter] public bool OverlayPolygonDashed { get; set; }
+    [Parameter] public IReadOnlyList<CanvasPoint>? OverlayPolygonPoints { get; set; }
+
+    [Parameter] public EventCallback<CanvasPoint> CanvasClicked { get; set; }
+
+    [Parameter] public EventCallback<ElementReference> CanvasReady { get; set; }
+
+    private ElementReference _canvas;
+
+    private byte[]? _lastBytes;
+
+    private int _imagePixelWidth;
+    private int _imagePixelHeight;
+
+    private double _scale = 1.0;
+    private double _offsetX;
+    private double _offsetY;
+
+    private bool _panning;
+    private double _lastClientX;
+    private double _lastClientY;
+
+    private readonly Dictionary<long, (double X, double Y)> _activePointers = new();
+
+    private bool _pinching;
+    private double _pinchStartDistance;
+    private double _pinchStartScale;
+    private double _pinchStartOffsetX;
+    private double _pinchStartOffsetY;
+    private double _pinchStartImageX;
+    private double _pinchStartImageY;
+    private DomRect? _panZoomRect;
+    private DomRect? _lastCanvasRect;
+
+    private double _panVelocityX;
+    private double _panVelocityY;
+    private long _lastPanMoveTick;
+    private CancellationTokenSource? _inertiaCts;
+
+    private double _touchMinScale = 0.05;
+    private double _touchMaxScale = 20.0;
+    private double _touchPinchExponent = 1.0;
+    private bool _touchInertiaEnabled = true;
+    private double _touchInertiaStartSpeed = 0.05;
+    private double _touchInertiaStopSpeed = 0.01;
+    private double _touchInertiaDecayPer16ms = 0.92;
+
+    private bool _drawing;
+    private readonly List<CanvasPoint> _strokePoints = new();
+    private DomRect? _strokeRect;
+
+    private bool _clickCandidate;
+    private DomRect? _clickRect;
+    private double _clickDownClientX;
+    private double _clickDownClientY;
+
+    private int? _dragHandleIndex;
+    private DomRect? _cachedRect;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Settings.InitializeAsync();
+        ApplyTouchSettings(Settings.Current);
+        Settings.Changed += OnSettingsChanged;
+    }
+
+    private void OnSettingsChanged(AppSettings s)
+    {
+        ApplyTouchSettings(s);
+    }
+
+    private void ApplyTouchSettings(AppSettings s)
+    {
+        _touchMinScale = Math.Clamp(s.TouchMinScale, 0.01, 10.0);
+        _touchMaxScale = Math.Clamp(Math.Max(_touchMinScale, s.TouchMaxScale), 0.1, 50.0);
+        _touchPinchExponent = Math.Clamp(s.TouchPinchExponent, 0.5, 2.0);
+
+        _touchInertiaEnabled = s.TouchInertiaEnabled;
+        _touchInertiaStartSpeed = Math.Clamp(s.TouchInertiaStartSpeed, 0.0, 1.0);
+        _touchInertiaStopSpeed = Math.Clamp(Math.Min(s.TouchInertiaStopSpeed, _touchInertiaStartSpeed), 0.0, 1.0);
+        _touchInertiaDecayPer16ms = Math.Clamp(s.TouchInertiaDecayPer16ms, 0.80, 0.99);
+
+        if (!_touchInertiaEnabled)
+            CancelInertia();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ReferenceEquals(ImageBytes, _lastBytes))
+            return;
+
+        _lastBytes = ImageBytes;
+
+        if (ImageBytes is null || ImageBytes.Length == 0)
+        {
+            await Js.InvokeVoidAsync("mogeCanvas.clear", _canvas);
+            _scale = 1;
+            _offsetX = 0;
+            _offsetY = 0;
+            _imagePixelWidth = 0;
+            _imagePixelHeight = 0;
+            return;
+        }
+
+        // Raw-token path (no OpenCV encoder available): render using cached RGBA pixels.
+        // Note: Some hosts (e.g., Hybrid) may not register an IRawImageProvider; treat it as optional.
+        if (RawToken.IsToken(ImageBytes))
+        {
+            var rawProvider = Services.GetService(typeof(IRawImageProvider)) as IRawImageProvider;
+            var sig = ImageSignature.Create(ImageBytes);
+            if (rawProvider is not null && rawProvider.TryGet(sig, out var raw) && raw.RgbaBytes is { Length: > 0 })
+            {
+                await Js.InvokeVoidAsync("mogeCanvas.setRawRgba", _canvas, raw.Width, raw.Height, raw.RgbaBytes);
+                _imagePixelWidth = raw.Width;
+                _imagePixelHeight = raw.Height;
+                await RedrawAsync();
+                return;
+            }
+
+            // Raw token without a cached RGBA payload: do not fall back to browser image decoding.
+            await Js.InvokeVoidAsync("mogeCanvas.clear", _canvas);
+            _scale = 1;
+            _offsetX = 0;
+            _offsetY = 0;
+            _imagePixelWidth = 0;
+            _imagePixelHeight = 0;
+            return;
+        }
+
+        var ct = InferContentType(ImageBytes, ContentType);
+        var dataUrl = $"data:{ct};base64,{Convert.ToBase64String(ImageBytes)}";
+        var info = await Js.InvokeAsync<ImageInfo>("mogeCanvas.setImage", _canvas, dataUrl);
+        _imagePixelWidth = Math.Max(0, info.width);
+        _imagePixelHeight = Math.Max(0, info.height);
+        await RedrawAsync();
+    }
+
+    private void ClampPanZoomToCanvas(DomRect rect)
+    {
+        if (_imagePixelWidth <= 0 || _imagePixelHeight <= 0)
+            return;
+
+        var canvasW = Math.Max(1.0, rect.width);
+        var canvasH = Math.Max(1.0, rect.height);
+
+        var imageW = Math.Max(1.0, _imagePixelWidth * _scale);
+        var imageH = Math.Max(1.0, _imagePixelHeight * _scale);
+
+        // Clamp offsets so the image stays within the canvas.
+        // - If the image is smaller than the canvas, allow panning within the extra slack.
+        // - If the image is larger, prevent "blank" areas by keeping the canvas covered.
+        var minX = Math.Min(0.0, canvasW - imageW);
+        var maxX = Math.Max(0.0, canvasW - imageW);
+        _offsetX = Math.Clamp(_offsetX, minX, maxX);
+
+        var minY = Math.Min(0.0, canvasH - imageH);
+        var maxY = Math.Max(0.0, canvasH - imageH);
+        _offsetY = Math.Clamp(_offsetY, minY, maxY);
+    }
+
+    private static string InferContentType(byte[] bytes, string? provided)
+    {
+        if (RawToken.IsToken(bytes))
+            return "application/x-moge-raw";
+
+        if (bytes.Length >= 12)
+        {
+            // PNG
+            if (bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47)
+                return "image/png";
+
+            // JPEG
+            if (bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF)
+                return "image/jpeg";
+
+            // GIF
+            if (bytes[0] == 0x47 && bytes[1] == 0x49 && bytes[2] == 0x46)
+                return "image/gif";
+
+            // BMP
+            if (bytes[0] == 0x42 && bytes[1] == 0x4D)
+                return "image/bmp";
+
+            // WEBP: RIFF....WEBP
+            if (bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46 &&
+                bytes[8] == 0x57 && bytes[9] == 0x45 && bytes[10] == 0x42 && bytes[11] == 0x50)
+                return "image/webp";
+        }
+
+        return string.IsNullOrWhiteSpace(provided) ? "image/png" : provided;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                await Js.InvokeVoidAsync("mogeLayout.preventWheelScroll", _canvas);
+            }
+            catch
+            {
+            }
+
+            if (CanvasReady.HasDelegate)
+                await CanvasReady.InvokeAsync(_canvas);
+
+            await RedrawAsync();
+        }
+    }
+
+    private async Task OnWheel(WheelEventArgs e)
+    {
+        if (ImageBytes is null || ImageBytes.Length == 0)
+            return;
+
+        if (InteractionMode != CanvasInteractionMode.PanZoom)
+            return;
+
+        CancelInertia();
+
+        var rect = await Js.InvokeAsync<DomRect>("mogeCanvas.getRect", _canvas);
+        _panZoomRect = rect;
+        _lastCanvasRect = rect;
+        var x = e.ClientX - rect.left;
+        var y = e.ClientY - rect.top;
+
+        var oldScale = _scale;
+        var zoom = e.DeltaY < 0 ? 1.1 : 0.9;
+        var newScale = Math.Clamp(oldScale * zoom, _touchMinScale, _touchMaxScale);
+
+        if (Math.Abs(newScale - oldScale) < 0.0001)
+            return;
+
+        _offsetX = x - (x - _offsetX) * (newScale / oldScale);
+        _offsetY = y - (y - _offsetY) * (newScale / oldScale);
+        _scale = newScale;
+
+        ClampPanZoomToCanvas(rect);
+
+        await RedrawAsync();
+    }
+
+    private async Task OnPointerDown(PointerEventArgs e)
+    {
+        if (ImageBytes is null || ImageBytes.Length == 0)
+            return;
+
+        CancelInertia();
+
+        // Track active pointers for pinch zoom (touch).
+        _activePointers[e.PointerId] = (e.ClientX, e.ClientY);
+
+        if (_dragHandleIndex is not null)
+            return;
+
+        if (InteractionMode is CanvasInteractionMode.MagicWand or CanvasInteractionMode.Text)
+        {
+            _clickCandidate = true;
+            _clickDownClientX = e.ClientX;
+            _clickDownClientY = e.ClientY;
+            _clickRect = await Js.InvokeAsync<DomRect>("mogeCanvas.getRect", _canvas);
+            return;
+        }
+
+        if (InteractionMode == CanvasInteractionMode.PanZoom)
+        {
+            if (_activePointers.Count >= 2)
+            {
+                if (_panZoomRect is null)
+                    _panZoomRect = await Js.InvokeAsync<DomRect>("mogeCanvas.getRect", _canvas);
+
+                _lastCanvasRect = _panZoomRect;
+
+                BeginPinch(_panZoomRect);
+                return;
+            }
+        }
+
+        if (InteractionMode is CanvasInteractionMode.Brush or CanvasInteractionMode.Eraser or CanvasInteractionMode.LassoSelection)
+        {
+            _drawing = true;
+            _strokePoints.Clear();
+            _strokeRect = await Js.InvokeAsync<DomRect>("mogeCanvas.getRect", _canvas);
+
+            var p = ClientToImagePoint(e.ClientX, e.ClientY, _strokeRect);
+            _strokePoints.Add(p);
+            return;
+        }
+
+        _panning = true;
+        _lastClientX = e.ClientX;
+        _lastClientY = e.ClientY;
+
+        _panZoomRect ??= await Js.InvokeAsync<DomRect>("mogeCanvas.getRect", _canvas);
+        _lastCanvasRect = _panZoomRect;
+        _lastPanMoveTick = Environment.TickCount64;
+        _panVelocityX = 0;
+        _panVelocityY = 0;
+    }
+
+    private async Task OnPointerMove(PointerEventArgs e)
+    {
+        if (_activePointers.ContainsKey(e.PointerId))
+            _activePointers[e.PointerId] = (e.ClientX, e.ClientY);
+
+        if (_clickCandidate)
+        {
+            var cdx = e.ClientX - _clickDownClientX;
+            var cdy = e.ClientY - _clickDownClientY;
+            if ((cdx * cdx) + (cdy * cdy) > (6 * 6))
+            {
+                _clickCandidate = false;
+                _clickRect = null;
+            }
+
+            return;
+        }
+
+        if (_pinching)
+        {
+            if (_panZoomRect is null)
+                _panZoomRect = await Js.InvokeAsync<DomRect>("mogeCanvas.getRect", _canvas);
+
+            _lastCanvasRect = _panZoomRect;
+
+            if (_activePointers.Count < 2)
+            {
+                _pinching = false;
+            }
+            else
+            {
+                ApplyPinch(_panZoomRect);
+                ClampPanZoomToCanvas(_panZoomRect);
+                await RedrawAsync();
+                return;
+            }
+        }
+
+        if (_drawing)
+        {
+            if (_strokeRect is null)
+                _strokeRect = await Js.InvokeAsync<DomRect>("mogeCanvas.getRect", _canvas);
+
+            var p = ClientToImagePoint(e.ClientX, e.ClientY, _strokeRect);
+            if (_strokePoints.Count == 0)
+            {
+                _strokePoints.Add(p);
+                // For lasso, trigger re-render to show live preview
+                if (InteractionMode == CanvasInteractionMode.LassoSelection)
+                    StateHasChanged();
+                return;
+            }
+
+            var last = _strokePoints[^1];
+            if (Math.Abs(p.X - last.X) < 0.5 && Math.Abs(p.Y - last.Y) < 0.5)
+                return;
+
+            _strokePoints.Add(p);
+            // For lasso, trigger re-render to show live preview
+            if (InteractionMode == CanvasInteractionMode.LassoSelection)
+                StateHasChanged();
+            return;
+        }
+
+        if (_dragHandleIndex is not null && Handles is { Count: > 0 })
+        {
+            await MoveHandleAsync(e);
+            return;
+        }
+
+        if (!_panning)
+            return;
+
+        var dx = e.ClientX - _lastClientX;
+        var dy = e.ClientY - _lastClientY;
+        _lastClientX = e.ClientX;
+        _lastClientY = e.ClientY;
+
+        var nowTick = Environment.TickCount64;
+        var dt = Math.Max(1, nowTick - _lastPanMoveTick);
+        _lastPanMoveTick = nowTick;
+
+        var vx = dx / dt;
+        var vy = dy / dt;
+        const double alpha = 0.25;
+        _panVelocityX = (_panVelocityX * (1 - alpha)) + (vx * alpha);
+        _panVelocityY = (_panVelocityY * (1 - alpha)) + (vy * alpha);
+
+        _offsetX += dx;
+        _offsetY += dy;
+
+        if (_panZoomRect is not null)
+            ClampPanZoomToCanvas(_panZoomRect);
+
+        await RedrawAsync();
+    }
+
+    private async Task OnPointerUp(PointerEventArgs e)
+    {
+        _activePointers.Remove(e.PointerId);
+
+        if (_clickCandidate)
+        {
+            _clickCandidate = false;
+
+            var rect = _clickRect ?? await Js.InvokeAsync<DomRect>("mogeCanvas.getRect", _canvas);
+            _clickRect = null;
+
+            if (CanvasClicked.HasDelegate)
+            {
+                var p = ClientToImagePoint(e.ClientX, e.ClientY, rect);
+                await CanvasClicked.InvokeAsync(p);
+            }
+
+            _panning = false;
+            _dragHandleIndex = null;
+            _cachedRect = null;
+            _panZoomRect = null;
+            return;
+        }
+
+        if (_drawing)
+        {
+            _drawing = false;
+            _strokeRect = null;
+
+            if (_strokePoints.Count >= 1)
+            {
+                var stroke = new CanvasStroke(InteractionMode, _strokePoints.ToArray());
+                _strokePoints.Clear();
+                await StrokeCommitted.InvokeAsync(stroke);
+            }
+            else
+            {
+                _strokePoints.Clear();
+            }
+
+            _panning = false;
+            _dragHandleIndex = null;
+            _cachedRect = null;
+            _panZoomRect = null;
+            return;
+        }
+
+        if (_pinching)
+        {
+            if (_activePointers.Count < 2)
+            {
+                _pinching = false;
+                _panZoomRect = null;
+            }
+
+            _panning = false;
+            _dragHandleIndex = null;
+            _cachedRect = null;
+            return;
+        }
+
+        if (_panning)
+        {
+            _panning = false;
+            _dragHandleIndex = null;
+            _cachedRect = null;
+
+            var speed = Math.Sqrt((_panVelocityX * _panVelocityX) + (_panVelocityY * _panVelocityY));
+            if (_touchInertiaEnabled && speed > _touchInertiaStartSpeed)
+                _ = StartInertiaAsync(_panVelocityX, _panVelocityY);
+
+            _panZoomRect = null;
+            return;
+        }
+
+        _panning = false;
+        _dragHandleIndex = null;
+        _cachedRect = null;
+        _panZoomRect = null;
+        await Task.CompletedTask;
+    }
+
+    private string GetCanvasCursorCss()
+    {
+        return InteractionMode switch
+        {
+            CanvasInteractionMode.PanZoom => "grab",
+            CanvasInteractionMode.Brush => "crosshair",
+            CanvasInteractionMode.Eraser => "crosshair",
+            CanvasInteractionMode.MagicWand => "crosshair",
+            CanvasInteractionMode.Text => "text",
+            CanvasInteractionMode.LassoSelection => "crosshair",
+            _ => "default"
+        };
+    }
+
+    private CanvasPoint ClientToImagePoint(double clientX, double clientY, DomRect rect)
+    {
+        var x = clientX - rect.left;
+        var y = clientY - rect.top;
+
+        var imageX = (x - _offsetX) / _scale;
+        var imageY = (y - _offsetY) / _scale;
+        return new CanvasPoint(imageX, imageY);
+    }
+
+    private async Task OnHandlePointerDown(int index, PointerEventArgs e)
+    {
+        if (!EnableHandles || Handles is null)
+            return;
+
+        if ((uint)index >= (uint)Handles.Count)
+            return;
+
+        _dragHandleIndex = index;
+        _panning = false;
+        _cachedRect = await Js.InvokeAsync<DomRect>("mogeCanvas.getRect", _canvas);
+
+        _lastClientX = e.ClientX;
+        _lastClientY = e.ClientY;
+    }
+
+    private async Task MoveHandleAsync(PointerEventArgs e)
+    {
+        if (_dragHandleIndex is null || Handles is null || _cachedRect is null)
+            return;
+
+        var dragIndex = _dragHandleIndex.Value;
+        if ((uint)dragIndex >= (uint)Handles.Count)
+            return;
+
+        var rect = _cachedRect;
+        var x = e.ClientX - rect.left;
+        var y = e.ClientY - rect.top;
+
+        var imageX = (x - _offsetX) / _scale;
+        var imageY = (y - _offsetY) / _scale;
+
+        var updated = Handles.ToArray();
+        updated[dragIndex] = new CanvasPoint(imageX, imageY);
+
+        // When handles represent an axis-aligned rectangle (crop), dragging one corner should move the
+        // corresponding edges (so the rectangle can shrink/grow with a single corner drag).
+        if (HandlesAsRectangle && updated.Length == 4)
+        {
+            // Index convention used by Editor crop mode:
+            // 0: TL, 1: TR, 2: BR, 3: BL
+            switch (dragIndex)
+            {
+                case 0: // TL (opposite: BR)
+                {
+                    var right = updated[2].X;
+                    var bottom = updated[2].Y;
+                    var left = updated[0].X;
+                    var top = updated[0].Y;
+                    updated[1] = new CanvasPoint(right, top);
+                    updated[3] = new CanvasPoint(left, bottom);
+                    break;
+                }
+                case 1: // TR (opposite: BL)
+                {
+                    var left = updated[3].X;
+                    var bottom = updated[3].Y;
+                    var right = updated[1].X;
+                    var top = updated[1].Y;
+                    updated[0] = new CanvasPoint(left, top);
+                    updated[2] = new CanvasPoint(right, bottom);
+                    break;
+                }
+                case 2: // BR (opposite: TL)
+                {
+                    var left = updated[0].X;
+                    var top = updated[0].Y;
+                    var right = updated[2].X;
+                    var bottom = updated[2].Y;
+                    updated[1] = new CanvasPoint(right, top);
+                    updated[3] = new CanvasPoint(left, bottom);
+                    break;
+                }
+                case 3: // BL (opposite: TR)
+                {
+                    var right = updated[1].X;
+                    var top = updated[1].Y;
+                    var left = updated[3].X;
+                    var bottom = updated[3].Y;
+                    updated[0] = new CanvasPoint(left, top);
+                    updated[2] = new CanvasPoint(right, bottom);
+                    break;
+                }
+            }
+        }
+
+        await HandlesChanged.InvokeAsync(updated);
+    }
+
+    private Task RedrawAsync()
+        => Js.InvokeAsync<object>("mogeCanvas.draw", _canvas, new { scale = _scale, offsetX = _offsetX, offsetY = _offsetY }).AsTask();
+
+    private void BeginPinch(DomRect rect)
+    {
+        var pointers = _activePointers.Values.Take(2).ToArray();
+        var p1 = pointers[0];
+        var p2 = pointers[1];
+
+        var cx = ((p1.X + p2.X) * 0.5) - rect.left;
+        var cy = ((p1.Y + p2.Y) * 0.5) - rect.top;
+
+        var dx = p2.X - p1.X;
+        var dy = p2.Y - p1.Y;
+        var dist = Math.Sqrt((dx * dx) + (dy * dy));
+        if (dist < 1)
+            dist = 1;
+
+        _pinching = true;
+        _pinchStartDistance = dist;
+        _pinchStartScale = _scale;
+        _pinchStartOffsetX = _offsetX;
+        _pinchStartOffsetY = _offsetY;
+
+        _pinchStartImageX = (cx - _pinchStartOffsetX) / _pinchStartScale;
+        _pinchStartImageY = (cy - _pinchStartOffsetY) / _pinchStartScale;
+
+        _panning = false;
+        _panVelocityX = 0;
+        _panVelocityY = 0;
+    }
+
+    private void ApplyPinch(DomRect rect)
+    {
+        var pointers = _activePointers.Values.Take(2).ToArray();
+        var p1 = pointers[0];
+        var p2 = pointers[1];
+
+        var cx = ((p1.X + p2.X) * 0.5) - rect.left;
+        var cy = ((p1.Y + p2.Y) * 0.5) - rect.top;
+
+        var dx = p2.X - p1.X;
+        var dy = p2.Y - p1.Y;
+        var dist = Math.Sqrt((dx * dx) + (dy * dy));
+        if (dist < 1)
+            dist = 1;
+
+        var ratio = dist / _pinchStartDistance;
+        var adjusted = Math.Pow(ratio, _touchPinchExponent);
+        var newScale = Math.Clamp(_pinchStartScale * adjusted, _touchMinScale, _touchMaxScale);
+        if (double.IsNaN(newScale) || double.IsInfinity(newScale))
+            return;
+
+        _scale = newScale;
+        _offsetX = cx - (_pinchStartImageX * _scale);
+        _offsetY = cy - (_pinchStartImageY * _scale);
+
+        ClampPanZoomToCanvas(rect);
+    }
+
+    private void CancelInertia()
+    {
+        if (_inertiaCts is null)
+            return;
+
+        try { _inertiaCts.Cancel(); } catch { }
+        _inertiaCts.Dispose();
+        _inertiaCts = null;
+    }
+
+    private Task StartInertiaAsync(double velocityX, double velocityY)
+    {
+        CancelInertia();
+
+        // Capture the last known canvas bounds for clamping during inertia.
+        var rect = _panZoomRect ?? _lastCanvasRect;
+
+        _inertiaCts = new CancellationTokenSource();
+        var ct = _inertiaCts.Token;
+
+        return Task.Run(async () =>
+        {
+            var vx = velocityX;
+            var vy = velocityY;
+            var lastTick = Environment.TickCount64;
+
+            while (!ct.IsCancellationRequested)
+            {
+                var nowTick = Environment.TickCount64;
+                var dt = Math.Max(1, nowTick - lastTick);
+                lastTick = nowTick;
+
+                // apply velocity (px/ms)
+                var dx = vx * dt;
+                var dy = vy * dt;
+                _offsetX += dx;
+                _offsetY += dy;
+
+                // friction: decay per 16ms frame
+                var decay = Math.Pow(_touchInertiaDecayPer16ms, dt / 16.0);
+                vx *= decay;
+                vy *= decay;
+
+                var speed = Math.Sqrt((vx * vx) + (vy * vy));
+                await InvokeAsync(async () =>
+                {
+                    if (rect is not null)
+                        ClampPanZoomToCanvas(rect);
+                    await RedrawAsync();
+                });
+
+                if (speed < _touchInertiaStopSpeed)
+                    break;
+
+                await Task.Delay(16, ct);
+            }
+        }, ct);
+    }
+
+    public void Dispose()
+    {
+        CancelInertia();
+        Settings.Changed -= OnSettingsChanged;
+    }
+
+    private sealed class DomRect
+    {
+        public double left { get; set; }
+        public double top { get; set; }
+        public double width { get; set; }
+        public double height { get; set; }
+    }
+
+    private sealed class ImageInfo
+    {
+        public int width { get; set; }
+        public int height { get; set; }
+    }
+}

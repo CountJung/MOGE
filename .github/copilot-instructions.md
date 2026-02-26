@@ -84,11 +84,12 @@
 ## 변경 작업 시 가이드 (우선순위)
 - 공용 UI/기능은 **먼저 SharedUI에 구현**하고, 플랫폼별 차이는 Host(WebApp/HybridApp)에서 DI/서비스로 분기합니다.
 - 페이지가 복잡해지면 `.razor`의 `@code` 블록 안에서 큰 `RenderFragment`를 직접 구성하지 말고, **별도 컴포넌트(.razor) 파일로 분리**한 뒤 파라미터/콜백으로 연결합니다(예: `SharedUI/Pages/EditorRightPanel.razor`).
-- (중요) Blazor UI는 **MVVM 패턴을 사용**합니다.
-  - `.razor`는 **마크업 중심**으로 유지하고, 로직은 우선 `.razor.cs`(code-behind)로 이동합니다.
-  - 화면/기능 상태는 `SharedUI/ViewModels/*`의 ViewModel로 이동하고(`INotifyPropertyChanged`/`ObservableObject` 기반), 컴포넌트는 ViewModel에 바인딩합니다.
-  - ViewModel ↔ 서비스는 DI/생성자 주입으로 연결하고, UI 이벤트는 “ViewModel 메서드/Command”로 위임합니다.
-  - 큰 기능 추가 시 **Razor 파일 길이를 늘리지 말고** ViewModel/서비스/컴포넌트로 분리합니다.
+- (중요) Blazor UI는 **바인딩 구조를 선호**합니다.
+  - `.razor`는 **마크업 중심**으로 유지하고, 로직은 우선 `.razor.cs`(code-behind)로 분리합니다.
+  - Blazor 표준 바인딩(`@bind`, `EventCallback`, 파라미터 단방향/양방향 바인딩)을 우선 적용합니다.
+  - 상태와 로직이 복잡한 페이지(예: Editor, Settings)는 `SharedUI/ViewModels/*`에 ViewModel을 두고 `ViewModelComponentBase<T>`로 바인딩할 수 있습니다. 단, **모든 컴포넌트에 ViewModel을 강제하지 않습니다**.
+  - 리프 컴포넌트(예: EditorHeader, EditorToolBar, EditorRightPanel)는 `[Parameter]` + `EventCallback` 패턴으로 충분하며, ViewModel 없이 코드-비하인드에서 직접 처리해도 됩니다.
+  - 큰 기능 추가 시 **Razor 파일 길이를 늘리지 말고** 코드-비하인드/서비스/컴포넌트로 분리합니다.
 - 브라우저에서 이미지 처리 코드를 수정할 때:
   - “파일 포맷 bytes” 대신 “RawToken/Raw RGBA 캐시”가 흘러갈 수 있음을 항상 고려합니다.
   - Raw 캐시 miss 시 동작(예외/메시지)을 깨지지 않게 유지합니다.

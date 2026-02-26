@@ -95,6 +95,8 @@ python -m http.server 8080
 
 ## 로드맵 (TODO)
 
+### 완료
+
 - [x] 브러시/지우개 MVP: Tools(좌측 툴바) 선택 + 스트로크 적용(브러시=흰색, 지우개=투명) + 히스토리 기록
 - [x] 좌측 툴 바 + 선택(사각형) + 선택영역 블러/샤프닝 도구(MVP, 레이어/마스크 제외)
 - [x] 간단한 크롭(Crop) UI + 적용
@@ -107,6 +109,29 @@ python -m http.server 8080
 - [x] 성능 개선: 큰 이미지에서 변환 파이프라인 프리뷰 스케일링
 - [x] 오류/로그 UX: 사용자에게 친절한 오류 메시지 + 로그 파일 내보내기
 - [x] 테스트 추가: Raw RGBA 연산(RgbaImageOps) 단위 테스트
+- [x] 레이어 시스템: 추가/복제/삭제/아래로 병합/가시성 토글 + 레이어별 히스토리
+- [x] Magic Wand 도구: 연결된 유사 색상 선택
+- [x] Text 도구: 다이얼로그 입력(글꼴 크기/두께/색상)
+- [x] 자유 선택(Lasso) 도구: 폴리곤 기반 영역 선택
+- [x] Copy / Cut / Paste (마스크 기반 클립보드)
+- [x] 원근 변환(Perspective Transform)
+- [x] 다중 이미지 로드(탭 전환) + 새 캔버스 생성
+- [x] 필터 파이프라인: Blur, Grayscale, Sepia, Invert, Saturation, Sketch, Cartoon, Emboss, Sharpen, Glow, ColorMap(8종), Posterize, Pixelize, Vignette, Noise, Canny Edge, Contrast, Brightness
+- [x] 설정 페이지: 테마(System/Light/Dark), 터치 설정, 로그 내보내기
+- [x] GitHub Pages 자동 배포(CI/CD)
+
+### 향후 개선
+
+- [ ] 레이어 불투명도(opacity) 슬라이더
+- [ ] 레이어 순서 변경(드래그 앤 드롭)
+- [ ] 레이어 이름 변경
+- [ ] 필터 프리셋 / 즐겨찾기
+- [ ] 사용자 지정 크기 리사이즈(너비 × 높이)
+- [ ] 줌 레벨 표시 / Fit-to-Screen
+- [ ] 색상 선택기(스포이드/Eyedropper) 도구
+- [ ] 도형 도구(사각형, 원, 직선)
+- [ ] 그라데이션 도구
+- [ ] 한글/유니코드 텍스트 렌더링 지원
 
 ---
 
