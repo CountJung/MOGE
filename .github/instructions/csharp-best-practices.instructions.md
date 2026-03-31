@@ -1,3 +1,7 @@
+---
+applyTo: "**/*.cs"
+---
+
 # C# Best Practices for AI Agents
 
 **Version 1.0.0**  
